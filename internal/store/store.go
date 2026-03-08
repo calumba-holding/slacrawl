@@ -17,6 +17,7 @@ import (
 const schema = `
 pragma foreign_keys = on;
 pragma journal_mode = wal;
+pragma busy_timeout = 5000;
 
 create table if not exists workspaces (
   id text primary key,
@@ -225,6 +226,18 @@ type ChannelRow struct {
 	Kind string `json:"kind"`
 }
 
+type ChannelSyncCursor struct {
+	ID       string
+	LatestTS string
+}
+
+type SyncStateRow struct {
+	SourceName string `json:"source_name"`
+	EntityType string `json:"entity_type"`
+	EntityID   string `json:"entity_id"`
+	Value      string `json:"value"`
+}
+
 func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
@@ -233,6 +246,8 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	if _, err := db.Exec(schema); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -348,10 +363,18 @@ on conflict(channel_id, ts) do update set
 	if err != nil {
 		return err
 	}
+	seenMentions := map[string]struct{}{}
 	for _, mention := range mentions {
+		key := mention.Type + "|" + mention.TargetID + "|" + mention.DisplayText
+		if _, ok := seenMentions[key]; ok {
+			continue
+		}
+		seenMentions[key] = struct{}{}
 		if _, err := tx.ExecContext(ctx, `
 insert into message_mentions (channel_id, ts, mention_type, target_id, display_text)
 values (?, ?, ?, ?, ?)
+on conflict(channel_id, ts, mention_type, target_id) do update set
+  display_text=excluded.display_text
 `, message.ChannelID, message.TS, mention.Type, mention.TargetID, mention.DisplayText); err != nil {
 			return err
 		}
@@ -560,6 +583,86 @@ limit ?
 	for rows.Next() {
 		var row ChannelRow
 		if err := rows.Scan(&row.ID, &row.Name, &row.Kind); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ChannelSyncCursors(ctx context.Context, workspaceID string) ([]ChannelSyncCursor, error) {
+	rows, err := s.db.QueryContext(ctx, `
+select c.id, coalesce(max(case when m.ts not like 'draft:%' then m.ts end), '')
+from channels c
+left join messages m on m.channel_id = c.id and m.workspace_id = c.workspace_id
+where c.workspace_id = ?
+group by c.id
+order by c.id asc
+`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []ChannelSyncCursor
+	for rows.Next() {
+		var row ChannelSyncCursor
+		if err := rows.Scan(&row.ID, &row.LatestTS); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) RenameChannel(ctx context.Context, channelID string, name string) error {
+	_, err := s.db.ExecContext(ctx, `
+update channels
+set name = ?, updated_at = ?
+where id = ?
+`, name, time.Now().UTC().Format(time.RFC3339), channelID)
+	return err
+}
+
+func (s *Store) SetChannelArchived(ctx context.Context, channelID string, archived bool) error {
+	_, err := s.db.ExecContext(ctx, `
+update channels
+set is_archived = ?, updated_at = ?
+where id = ?
+`, boolInt(archived), time.Now().UTC().Format(time.RFC3339), channelID)
+	return err
+}
+
+func (s *Store) GetSyncState(ctx context.Context, source, entityType, entityID string) (string, error) {
+	var value string
+	err := s.db.QueryRowContext(ctx, `
+select value from sync_state
+where source_name = ? and entity_type = ? and entity_id = ?
+`, source, entityType, entityID).Scan(&value)
+	if err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+func (s *Store) ListSyncState(ctx context.Context, source, entityType string, limit int) ([]SyncStateRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+select source_name, entity_type, entity_id, value
+from sync_state
+where (? = '' or source_name = ?)
+  and (? = '' or entity_type = ?)
+order by updated_at desc, entity_id asc
+limit ?
+`, source, source, entityType, entityType, RequireLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []SyncStateRow
+	for rows.Next() {
+		var row SyncStateRow
+		if err := rows.Scan(&row.SourceName, &row.EntityType, &row.EntityID, &row.Value); err != nil {
 			return nil, err
 		}
 		out = append(out, row)

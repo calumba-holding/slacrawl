@@ -3,8 +3,6 @@ package syncer
 import (
 	"context"
 	"errors"
-	"strings"
-	"time"
 
 	"github.com/vincentkoc/slacrawl/internal/config"
 	"github.com/vincentkoc/slacrawl/internal/slackapi"
@@ -26,6 +24,7 @@ type Options struct {
 	Channels    []string
 	Since       string
 	Full        bool
+	Concurrency int
 }
 
 type Summary struct {
@@ -43,6 +42,7 @@ func Run(ctx context.Context, cfg config.Config, st *store.Store, opts Options) 
 			Channels:    opts.Channels,
 			Since:       opts.Since,
 			Full:        opts.Full,
+			Concurrency: opts.Concurrency,
 		})
 	case SourceDesktop:
 		return syncDesktop(ctx, cfg, st)
@@ -52,6 +52,7 @@ func Run(ctx context.Context, cfg config.Config, st *store.Store, opts Options) 
 			Channels:    opts.Channels,
 			Since:       opts.Since,
 			Full:        opts.Full,
+			Concurrency: opts.Concurrency,
 		}); err != nil {
 			return summary, err
 		}
@@ -62,21 +63,11 @@ func Run(ctx context.Context, cfg config.Config, st *store.Store, opts Options) 
 }
 
 func syncDesktop(ctx context.Context, cfg config.Config, st *store.Store) (Summary, error) {
-	source, err := slackdesktop.Discover(cfg.Slack.Desktop.Path)
+	if !cfg.Slack.Desktop.Enabled {
+		return Summary{Desktop: slackdesktop.Source{Path: cfg.Slack.Desktop.Path, Available: false}}, nil
+	}
+	source, err := slackdesktop.Ingest(ctx, st, cfg.Slack.Desktop.Path)
 	if err != nil {
-		return Summary{}, err
-	}
-	if !source.Available {
-		return Summary{Desktop: source}, nil
-	}
-	if err := st.SetSyncState(ctx, "desktop", "root_state", "path", source.Path); err != nil {
-		return Summary{}, err
-	}
-	payload := []byte(strings.Join(source.Summary.AppTeamsKeys, ","))
-	if err := st.SetSyncState(ctx, "desktop", "root_state", "app_teams", string(payload)); err != nil {
-		return Summary{}, err
-	}
-	if err := st.SetSyncState(ctx, "desktop", "root_state", "scanned_at", time.Now().UTC().Format(time.RFC3339)); err != nil {
 		return Summary{}, err
 	}
 	return Summary{Desktop: source}, nil
