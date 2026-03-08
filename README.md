@@ -1,4 +1,4 @@
-<h1 align="center">slacrawl</h1>
+<h1 align="center">💾 slacrawl</h1>
 
 <p align="center">
   <strong>Mirror Slack workspace data into local SQLite for fast search, structured queries, and offline inspection.</strong>
