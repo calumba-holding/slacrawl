@@ -122,6 +122,54 @@ Choose the path that matches your setup:
 - `users` lists synced users
 - `channels` lists synced channels
 - `status` prints workspace and sync status
+- `completion` prints shell completion for `bash` or `zsh`
+
+## Output Modes
+
+The CLI supports three output modes:
+
+- `--format text` for the styled default terminal view
+- `--format json` or `--json` for machine-readable output
+- `--format log` for line-oriented automation-friendly output
+
+Color is disabled automatically when stdout is not a TTY. You can also force plain text with `--no-color` or `NO_COLOR=1`.
+
+## Make Targets
+
+```bash
+make build
+make test
+make run ARGS="status"
+make completion
+```
+
+Completion files are generated into `dist/completions/`.
+
+## Shell Completion
+
+Generate completion scripts with:
+
+```bash
+go run ./cmd/slacrawl completion bash
+go run ./cmd/slacrawl completion zsh
+```
+
+Or use the Makefile:
+
+```bash
+make completion
+```
+
+Typical install locations:
+
+```bash
+# bash
+go run ./cmd/slacrawl completion bash > /usr/local/etc/bash_completion.d/slacrawl
+
+# zsh
+mkdir -p "${HOME}/.zsh/completions"
+go run ./cmd/slacrawl completion zsh > "${HOME}/.zsh/completions/_slacrawl"
+```
 
 ## Default Paths
 

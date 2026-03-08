@@ -23,6 +23,14 @@ type App struct {
 	Stderr io.Writer
 }
 
+type OutputFormat string
+
+const (
+	FormatText OutputFormat = "text"
+	FormatJSON OutputFormat = "json"
+	FormatLog  OutputFormat = "log"
+)
+
 func New() *App {
 	return &App{
 		Stdout: os.Stdout,
@@ -33,14 +41,23 @@ func New() *App {
 func (a *App) Run(ctx context.Context, args []string) error {
 	global := flag.NewFlagSet("slacrawl", flag.ContinueOnError)
 	global.SetOutput(a.Stderr)
+	global.Usage = func() {}
 	configPath := global.String("config", "", "config path")
+	format := global.String("format", string(FormatText), "output format: text|json|log")
 	jsonOut := global.Bool("json", false, "json output")
+	noColor := global.Bool("no-color", false, "disable ANSI color in text output")
 	if err := global.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			a.setColorEnabled(FormatText, *noColor)
+			a.printHelp()
+			return nil
+		}
 		return err
 	}
 
 	rest := global.Args()
 	if len(rest) == 0 {
+		a.setColorEnabled(FormatText, *noColor)
 		a.printHelp()
 		return nil
 	}
@@ -53,37 +70,87 @@ func (a *App) Run(ctx context.Context, args []string) error {
 		*configPath = path
 	}
 
+	outputFormat, err := resolveOutputFormat(*format, *jsonOut)
+	if err != nil {
+		return err
+	}
+	a.setColorEnabled(outputFormat, *noColor)
+
 	switch rest[0] {
 	case "init":
-		return a.runInit(*configPath, rest[1:], *jsonOut)
+		return a.runInit(*configPath, rest[1:], outputFormat)
 	case "doctor":
-		return a.runDoctor(ctx, *configPath, *jsonOut)
+		return a.runDoctor(ctx, *configPath, outputFormat)
 	case "status":
-		return a.runStatus(ctx, *configPath, *jsonOut)
+		return a.runStatus(ctx, *configPath, outputFormat)
 	case "sync":
-		return a.runSync(ctx, *configPath, rest[1:], *jsonOut)
+		return a.runSync(ctx, *configPath, rest[1:], outputFormat)
 	case "search":
-		return a.runSearch(ctx, *configPath, rest[1:], *jsonOut)
+		return a.runSearch(ctx, *configPath, rest[1:], outputFormat)
 	case "messages":
-		return a.runMessages(ctx, *configPath, rest[1:], *jsonOut)
+		return a.runMessages(ctx, *configPath, rest[1:], outputFormat)
 	case "mentions":
-		return a.runMentions(ctx, *configPath, rest[1:], *jsonOut)
+		return a.runMentions(ctx, *configPath, rest[1:], outputFormat)
 	case "sql":
-		return a.runSQL(ctx, *configPath, rest[1:], *jsonOut)
+		return a.runSQL(ctx, *configPath, rest[1:], outputFormat)
 	case "users":
-		return a.runUsers(ctx, *configPath, rest[1:], *jsonOut)
+		return a.runUsers(ctx, *configPath, rest[1:], outputFormat)
 	case "channels":
-		return a.runChannels(ctx, *configPath, rest[1:], *jsonOut)
+		return a.runChannels(ctx, *configPath, rest[1:], outputFormat)
+	case "completion":
+		return a.runCompletion(rest[1:])
 	case "tail":
 		return a.runTail(ctx, *configPath, rest[1:])
 	case "watch":
-		return a.runWatch(ctx, *configPath, rest[1:], *jsonOut)
+		return a.runWatch(ctx, *configPath, rest[1:], outputFormat)
 	default:
 		return fmt.Errorf("unknown command: %s", rest[0])
 	}
 }
 
-func (a *App) runInit(configPath string, args []string, jsonOut bool) error {
+func (a *App) setColorEnabled(format OutputFormat, noColor bool) {
+	ansiEnabled = format == FormatText && !noColor && colorAllowedByEnv() && writerIsTTY(a.Stdout)
+}
+
+func colorAllowedByEnv() bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	if strings.EqualFold(os.Getenv("TERM"), "dumb") {
+		return false
+	}
+	return true
+}
+
+func writerIsTTY(w io.Writer) bool {
+	file, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+func resolveOutputFormat(value string, jsonOut bool) (OutputFormat, error) {
+	if jsonOut {
+		return FormatJSON, nil
+	}
+	switch OutputFormat(strings.ToLower(strings.TrimSpace(value))) {
+	case "", FormatText:
+		return FormatText, nil
+	case FormatJSON:
+		return FormatJSON, nil
+	case FormatLog:
+		return FormatLog, nil
+	default:
+		return "", fmt.Errorf("unsupported format %q: use text, json, or log", value)
+	}
+}
+
+func (a *App) runInit(configPath string, args []string, format OutputFormat) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(a.Stderr)
 	workspaceID := fs.String("workspace", "", "workspace id")
@@ -105,13 +172,14 @@ func (a *App) runInit(configPath string, args []string, jsonOut bool) error {
 	if err := cfg.Save(configPath); err != nil {
 		return err
 	}
-	return a.write(jsonOut, map[string]any{
+	result := map[string]any{
 		"config_path": configPath,
 		"db_path":     cfg.DBPath,
-	})
+	}
+	return a.writeOutput("Init", result, format, true)
 }
 
-func (a *App) runDoctor(ctx context.Context, configPath string, jsonOut bool) error {
+func (a *App) runDoctor(ctx context.Context, configPath string, format OutputFormat) error {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return err
@@ -174,10 +242,10 @@ func (a *App) runDoctor(ctx context.Context, configPath string, jsonOut bool) er
 		"status":            status,
 		"fts_available":     true,
 	}
-	return a.write(jsonOut, report)
+	return a.writeOutput("Doctor", report, format, true)
 }
 
-func (a *App) runStatus(ctx context.Context, configPath string, jsonOut bool) error {
+func (a *App) runStatus(ctx context.Context, configPath string, format OutputFormat) error {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return err
@@ -191,14 +259,10 @@ func (a *App) runStatus(ctx context.Context, configPath string, jsonOut bool) er
 	if err != nil {
 		return err
 	}
-	if jsonOut {
-		return a.write(true, status)
-	}
-	_, err = fmt.Fprintln(a.Stdout, store.PrettyStatus(status))
-	return err
+	return a.writeOutput("Status", status, format, true)
 }
 
-func (a *App) runSync(ctx context.Context, configPath string, args []string, jsonOut bool) error {
+func (a *App) runSync(ctx context.Context, configPath string, args []string, format OutputFormat) error {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return err
@@ -237,13 +301,14 @@ func (a *App) runSync(ctx context.Context, configPath string, args []string, jso
 	if err != nil {
 		return err
 	}
-	return a.write(jsonOut, map[string]any{
+	result := map[string]any{
 		"status":  status,
 		"summary": summary,
-	})
+	}
+	return a.writeOutput("Sync", result, format, true)
 }
 
-func (a *App) runSearch(ctx context.Context, configPath string, args []string, jsonOut bool) error {
+func (a *App) runSearch(ctx context.Context, configPath string, args []string, format OutputFormat) error {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return err
@@ -260,10 +325,10 @@ func (a *App) runSearch(ctx context.Context, configPath string, args []string, j
 	if err != nil {
 		return err
 	}
-	return a.write(jsonOut, results)
+	return a.writeOutput("Search", results, format, false)
 }
 
-func (a *App) runMessages(ctx context.Context, configPath string, args []string, jsonOut bool) error {
+func (a *App) runMessages(ctx context.Context, configPath string, args []string, format OutputFormat) error {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return err
@@ -285,10 +350,10 @@ func (a *App) runMessages(ctx context.Context, configPath string, args []string,
 	if err != nil {
 		return err
 	}
-	return a.write(jsonOut, results)
+	return a.writeOutput("Messages", results, format, false)
 }
 
-func (a *App) runMentions(ctx context.Context, configPath string, args []string, jsonOut bool) error {
+func (a *App) runMentions(ctx context.Context, configPath string, args []string, format OutputFormat) error {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return err
@@ -309,10 +374,10 @@ func (a *App) runMentions(ctx context.Context, configPath string, args []string,
 	if err != nil {
 		return err
 	}
-	return a.write(jsonOut, results)
+	return a.writeOutput("Mentions", results, format, false)
 }
 
-func (a *App) runSQL(ctx context.Context, configPath string, args []string, jsonOut bool) error {
+func (a *App) runSQL(ctx context.Context, configPath string, args []string, format OutputFormat) error {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return err
@@ -337,10 +402,10 @@ func (a *App) runSQL(ctx context.Context, configPath string, args []string, json
 	if err != nil {
 		return err
 	}
-	return a.write(jsonOut, results)
+	return a.writeOutput("SQL", results, format, false)
 }
 
-func (a *App) runUsers(ctx context.Context, configPath string, args []string, jsonOut bool) error {
+func (a *App) runUsers(ctx context.Context, configPath string, args []string, format OutputFormat) error {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return err
@@ -358,10 +423,10 @@ func (a *App) runUsers(ctx context.Context, configPath string, args []string, js
 	if err != nil {
 		return err
 	}
-	return a.write(jsonOut, results)
+	return a.writeOutput("Users", results, format, false)
 }
 
-func (a *App) runChannels(ctx context.Context, configPath string, args []string, jsonOut bool) error {
+func (a *App) runChannels(ctx context.Context, configPath string, args []string, format OutputFormat) error {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return err
@@ -379,7 +444,7 @@ func (a *App) runChannels(ctx context.Context, configPath string, args []string,
 	if err != nil {
 		return err
 	}
-	return a.write(jsonOut, results)
+	return a.writeOutput("Channels", results, format, false)
 }
 
 func (a *App) runTail(ctx context.Context, configPath string, args []string) error {
@@ -406,7 +471,7 @@ func (a *App) runTail(ctx context.Context, configPath string, args []string) err
 	return slackapi.New(cfg.ResolveTokens()).Tail(ctx, st, coalesce(*workspaceID, cfg.WorkspaceID), repairDuration)
 }
 
-func (a *App) runWatch(ctx context.Context, configPath string, args []string, jsonOut bool) error {
+func (a *App) runWatch(ctx context.Context, configPath string, args []string, format OutputFormat) error {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return err
@@ -443,10 +508,10 @@ func (a *App) runWatch(ctx context.Context, configPath string, args []string, js
 		if err != nil {
 			return err
 		}
-		return a.write(jsonOut, map[string]any{
+		return a.writeOutput("Watch", map[string]any{
 			"status":  status,
 			"summary": summary,
-		})
+		}, format, true)
 	}
 	if err := syncOnce(); err != nil {
 		return err
@@ -466,22 +531,10 @@ func (a *App) runWatch(ctx context.Context, configPath string, args []string, js
 	}
 }
 
-func (a *App) write(jsonOut bool, value any) error {
-	if jsonOut {
-		enc := json.NewEncoder(a.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(value)
-	}
-	data, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintln(a.Stdout, string(data))
-	return err
-}
-
-func (a *App) printHelp() {
-	_, _ = fmt.Fprintln(a.Stdout, "slacrawl commands: init doctor sync tail watch search messages mentions sql users channels status")
+func (a *App) writeJSON(value any) error {
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(value)
 }
 
 func loadConfig(path string) (config.Config, error) {

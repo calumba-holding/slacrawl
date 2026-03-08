@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -39,6 +41,12 @@ func TestInitStatusAndSQL(t *testing.T) {
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &rows))
 	require.Len(t, rows, 1)
 	require.Equal(t, float64(0), rows[0]["messages"])
+
+	stdout.Reset()
+	require.NoError(t, app.Run(ctx, []string{"--config", configPath, "--format", "json", "status"}))
+	var statusByFormat map[string]any
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &statusByFormat))
+	require.Equal(t, float64(0), statusByFormat["messages"])
 }
 
 func TestDoctorReflectsDisabledSources(t *testing.T) {
@@ -134,4 +142,135 @@ func TestDoctorIncludesOperationalSyncState(t *testing.T) {
 	state := tail[0].(map[string]any)
 	require.Equal(t, "connection", state["entity_type"])
 	require.Equal(t, "T123", state["entity_id"])
+}
+
+func TestHelpIncludesBannerAndUsage(t *testing.T) {
+	var stdout bytes.Buffer
+	app := &App{
+		Stdout: &stdout,
+		Stderr: &stdout,
+	}
+
+	require.NoError(t, app.Run(context.Background(), nil))
+
+	out := stdout.String()
+	require.Contains(t, out, "local-first slack mirror for SQLite")
+	require.Contains(t, out, "Usage:")
+	require.Contains(t, out, "slacrawl [global flags] <command> [args]")
+	require.Contains(t, out, "--format <kind>")
+	require.Contains(t, out, "--no-color")
+}
+
+func TestStatusHumanOutputIsStructured(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.toml")
+	dbPath := filepath.Join(tmp, "slacrawl.db")
+
+	var stdout bytes.Buffer
+	app := &App{
+		Stdout: &stdout,
+		Stderr: &stdout,
+	}
+
+	ctx := context.Background()
+	require.NoError(t, app.Run(ctx, []string{"--config", configPath, "init", "--db", dbPath}))
+
+	stdout.Reset()
+	require.NoError(t, app.Run(ctx, []string{"--config", configPath, "status"}))
+
+	out := stdout.String()
+	require.Contains(t, out, "STATUS")
+	require.Contains(t, out, "workspaces")
+	require.Contains(t, out, "messages")
+	require.True(t, strings.Contains(out, "never") || strings.Contains(out, "last sync"))
+	require.NotContains(t, out, "\x1b[")
+}
+
+func TestStatusLogOutputIsLineOriented(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.toml")
+	dbPath := filepath.Join(tmp, "slacrawl.db")
+
+	var stdout bytes.Buffer
+	app := &App{
+		Stdout: &stdout,
+		Stderr: &stdout,
+	}
+
+	ctx := context.Background()
+	require.NoError(t, app.Run(ctx, []string{"--config", configPath, "init", "--db", dbPath}))
+
+	stdout.Reset()
+	require.NoError(t, app.Run(ctx, []string{"--config", configPath, "--format", "log", "status"}))
+
+	out := stdout.String()
+	require.Contains(t, out, "status ")
+	require.Contains(t, out, "messages=\"0\"")
+	require.NotContains(t, out, "STATUS")
+	require.NotContains(t, out, "local-first slack mirror for SQLite")
+}
+
+func TestInvalidFormatFails(t *testing.T) {
+	var stdout bytes.Buffer
+	app := &App{
+		Stdout: &stdout,
+		Stderr: &stdout,
+	}
+
+	err := app.Run(context.Background(), []string{"--format", "yaml", "status"})
+	require.ErrorContains(t, err, "unsupported format")
+}
+
+func TestNoColorFlagDisablesANSIOnTTYWriter(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.toml")
+	dbPath := filepath.Join(tmp, "slacrawl.db")
+
+	file, err := os.Create(filepath.Join(tmp, "stdout.txt"))
+	require.NoError(t, err)
+	defer file.Close()
+
+	app := &App{
+		Stdout: file,
+		Stderr: file,
+	}
+
+	ctx := context.Background()
+	require.NoError(t, app.Run(ctx, []string{"--config", configPath, "init", "--db", dbPath}))
+	require.NoError(t, app.Run(ctx, []string{"--config", configPath, "--no-color", "status"}))
+	require.NoError(t, file.Close())
+
+	data, err := os.ReadFile(filepath.Join(tmp, "stdout.txt"))
+	require.NoError(t, err)
+	require.NotContains(t, string(data), "\x1b[")
+}
+
+func TestCompletionBashOutput(t *testing.T) {
+	var stdout bytes.Buffer
+	app := &App{
+		Stdout: &stdout,
+		Stderr: &stdout,
+	}
+
+	require.NoError(t, app.Run(context.Background(), []string{"completion", "bash"}))
+
+	out := stdout.String()
+	require.Contains(t, out, "complete -F _slacrawl slacrawl")
+	require.Contains(t, out, "completion")
+	require.Contains(t, out, "--format")
+}
+
+func TestCompletionZshOutput(t *testing.T) {
+	var stdout bytes.Buffer
+	app := &App{
+		Stdout: &stdout,
+		Stderr: &stdout,
+	}
+
+	require.NoError(t, app.Run(context.Background(), []string{"completion", "zsh"}))
+
+	out := stdout.String()
+	require.Contains(t, out, "#compdef slacrawl")
+	require.Contains(t, out, "_values 'shell' bash zsh")
+	require.Contains(t, out, "--no-color")
 }
