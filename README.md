@@ -11,6 +11,10 @@
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey" alt="Platform">
 </p>
 
+<p align="center">
+  <img src="screenshot.png" alt="slascrawl Demo"/>
+</p>
+
 ## Why slacrawl?
 
 Slack search is convenient until you need your own workflow, your own retention, or your own queries. `slacrawl` is a Go-based CLI that pulls Slack workspace metadata and message history into SQLite so you can inspect it without depending on the Slack UI.
