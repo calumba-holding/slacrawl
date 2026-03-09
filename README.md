@@ -1,7 +1,7 @@
 <h1 align="center">💾 slacrawl</h1>
 
 <p align="center">
-  <strong>A Go-based CLI for mirroring Slack workspace data into local SQLite for search, querying, and offline inspection.</strong>
+  <strong>A Go-based CLI for mirroring Slack workspace data into local SQLite<br> for search, querying, and offline inspection.</strong>
 </p>
 
 <p align="center">
