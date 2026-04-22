@@ -89,15 +89,15 @@ Download the package that matches your platform from the [latest release](https:
 Debian/Ubuntu:
 
 ```bash
-curl -LO https://github.com/vincentkoc/slacrawl/releases/latest/download/slacrawl_0.4.0_amd64.deb
-sudo dpkg -i slacrawl_0.4.0_amd64.deb
+curl -LO https://github.com/vincentkoc/slacrawl/releases/latest/download/slacrawl_0.5.0_amd64.deb
+sudo dpkg -i slacrawl_0.5.0_amd64.deb
 ```
 
 RHEL/Fedora:
 
 ```bash
-curl -LO https://github.com/vincentkoc/slacrawl/releases/latest/download/slacrawl-0.4.0-1.x86_64.rpm
-sudo rpm -i slacrawl-0.4.0-1.x86_64.rpm
+curl -LO https://github.com/vincentkoc/slacrawl/releases/latest/download/slacrawl-0.5.0-1.x86_64.rpm
+sudo rpm -i slacrawl-0.5.0-1.x86_64.rpm
 ```
 
 </details>
@@ -156,6 +156,7 @@ Choose the path that matches your setup:
 
 - `init` creates a starter config file
 - `doctor` checks config, DB access, token presence, FTS, and desktop source availability
+- `report` summarizes archive activity and git-share freshness without writing SQL
 - `publish` exports the local SQLite archive into a git repo as compressed JSONL shards plus a manifest
 - `subscribe` configures a git-backed reader that can run without Slack credentials
 - `update` pulls and imports the latest git snapshot
@@ -250,6 +251,15 @@ By default, each workspace entry automatically looks for `SLACK_<WORKSPACE_ID>_B
 
 Without `--workspace`, `sync --source api` and `tail` fan out across every configured workspace entry. Read commands such as `search`, `messages`, `mentions`, `users`, and `channels` accept `--workspace` to scope the shared local database when needed.
 
+## Git Archive Sharing
+
+Use git-share mode when one machine has Slack credentials and should publish snapshots, while other machines only need a local read-only archive.
+
+Typical split:
+
+- publisher machine: runs `sync`, then `publish --push`
+- subscriber machine: runs `subscribe`, then reads from local SQLite with optional read-time auto-refresh
+
 Git-backed archive sharing is configured under `[share]`:
 
 ```toml
@@ -270,6 +280,61 @@ Behavior:
 - `status`, `search`, `messages`, `mentions`, `sql`, `users`, `channels`, and `report` auto-refresh stale git snapshots before reading when `auto_update = true`
 - `sync --source api` and `sync --source all` warm from the git snapshot before hitting Slack when a share remote is configured
 - `status` and `doctor` surface the current git-share repo, last import time, and whether the local snapshot is stale
+
+### `publish`
+
+`publish` is the writer-side command. It exports the current SQLite archive into the git share repo and can commit/push it in one step.
+
+```bash
+go run ./cmd/slacrawl publish --remote /path/to/private/slacrawl-archive.git --push
+go run ./cmd/slacrawl publish --repo ~/.slacrawl/share --branch main --message "archive: daily refresh" --push
+```
+
+Relevant flags:
+
+- `--repo` chooses the local git working repo path
+- `--remote` sets or overrides the git remote used for publish
+- `--branch` chooses the target branch
+- `--message` sets the git commit message
+- `--no-commit` exports files without creating a git commit
+- `--push` pushes the new commit to `origin`
+
+### `subscribe`
+
+`subscribe` is the reader-side setup command. It clones the git archive, writes a share-reader config, disables live Slack sources for that config, and imports the snapshot into SQLite.
+
+```bash
+go run ./cmd/slacrawl subscribe --repo ~/.slacrawl/share --db ~/.slacrawl/slacrawl.db /path/to/private/slacrawl-archive.git
+go run ./cmd/slacrawl subscribe --remote git@github.com:your-org/private-slacrawl-archive.git --stale-after 30m
+go run ./cmd/slacrawl subscribe --repo ~/.slacrawl/share --no-import --no-auto-update /path/to/private/slacrawl-archive.git
+```
+
+Relevant flags:
+
+- `--repo` chooses the local clone path
+- `--db` chooses the SQLite file used by the reader
+- `--branch` chooses which branch to track
+- `--remote` stores the remote in config without requiring it as a positional arg
+- `--stale-after` controls when read-time refresh considers the local snapshot stale
+- `--no-auto-update` disables read-time refresh for search/status/report-style commands
+- `--no-import` skips the initial snapshot import
+
+### `update`
+
+`update` is the explicit reader-side refresh. Use it when you want to pull and import on demand instead of waiting for automatic stale checks.
+
+```bash
+go run ./cmd/slacrawl update
+go run ./cmd/slacrawl update --repo ~/.slacrawl/share --branch main
+```
+
+### `report`
+
+`report` is the fastest human-readable archive summary and is especially handy in git-share mode because it shows the current archive footprint plus share freshness.
+
+```bash
+go run ./cmd/slacrawl report
+```
 
 Typical publish / subscribe flow:
 
