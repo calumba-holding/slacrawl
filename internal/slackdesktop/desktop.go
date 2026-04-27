@@ -219,7 +219,7 @@ func Inspect(path string) (Source, error) {
 	if err != nil {
 		return Source{}, err
 	}
-	defer os.RemoveAll(filepath.Dir(snapshot.Root))
+	defer func() { _ = os.RemoveAll(filepath.Dir(snapshot.Root)) }()
 
 	extracted, err := Extract(snapshot.Root)
 	if err != nil {
@@ -239,7 +239,7 @@ func SnapshotPath(path string) (Snapshot, error) {
 	}
 
 	target := filepath.Join(root, "Slack")
-	if err := os.MkdirAll(target, 0o755); err != nil {
+	if err := os.MkdirAll(target, 0o750); err != nil {
 		return Snapshot{}, err
 	}
 
@@ -531,7 +531,7 @@ func countExpandables(records []ExpandableRecord) int {
 }
 
 func LoadRootState(path string) (RootStateData, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // Reads the explicit Slack desktop state file selected by discovery.
 	if err != nil {
 		return RootStateData{}, err
 	}
@@ -580,7 +580,7 @@ func ParseLocalStorage(path string) (localStorageData, error) {
 	if err != nil {
 		return localStorageData{}, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	var (
 		configData LocalConfig
@@ -759,7 +759,7 @@ func ScanIndexedDB(path string) (IndexedDBSummary, error) {
 	if err != nil {
 		return IndexedDBSummary{}, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	stores := map[string]struct{}{}
 	iter := db.NewIterator(nil, nil)
@@ -791,6 +791,7 @@ func (indexedDBComparer) Name() string            { return "idb_cmp1" }
 func (indexedDBComparer) Separator(dst, a, b []byte) []byte {
 	return comparer.DefaultComparer.Separator(dst, a, b)
 }
+
 func (indexedDBComparer) Successor(dst, b []byte) []byte {
 	return comparer.DefaultComparer.Successor(dst, b)
 }
@@ -968,10 +969,10 @@ func copyPath(src string, dst string) error {
 		}
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
 		return err
 	}
-	data, err := os.ReadFile(src)
+	data, err := os.ReadFile(src) //nolint:gosec // Snapshot copy reads from discovered Slack desktop paths.
 	if err != nil {
 		return err
 	}

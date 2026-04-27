@@ -211,7 +211,7 @@ func (a *App) runDoctor(ctx context.Context, configPath string, format OutputFor
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	tokens := cfg.ResolveTokens()
 	diag, err := slackapi.New(tokens).WithIncludeDMs(cfg.IncludeDMsResolved(tokens.User != "")).Doctor(ctx)
@@ -291,7 +291,7 @@ func (a *App) runStatus(ctx context.Context, configPath string, format OutputFor
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	status, err := st.Status(ctx)
 	if err != nil {
 		return err
@@ -335,7 +335,7 @@ func (a *App) runSync(ctx context.Context, configPath string, args []string, for
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	if runOptions.Source != syncer.SourceDesktop {
 		if err := a.autoUpdateShare(ctx, cfg, st); err != nil {
 			return err
@@ -374,7 +374,7 @@ func (a *App) runSearch(ctx context.Context, configPath string, args []string, f
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	results, err := st.Search(ctx, coalesce(*workspaceID, cfg.WorkspaceID), strings.Join(fs.Args(), " "), 50)
 	if err != nil {
 		return err
@@ -400,7 +400,7 @@ func (a *App) runMessages(ctx context.Context, configPath string, args []string,
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	results, err := st.Messages(ctx, coalesce(*workspaceID, cfg.WorkspaceID), *channelID, *userID, store.RequireLimit(*limit))
 	if err != nil {
 		return err
@@ -425,7 +425,7 @@ func (a *App) runMentions(ctx context.Context, configPath string, args []string,
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	results, err := st.Mentions(ctx, coalesce(*workspaceID, cfg.WorkspaceID), *target, store.RequireLimit(*limit))
 	if err != nil {
 		return err
@@ -453,7 +453,7 @@ func (a *App) runSQL(ctx context.Context, configPath string, args []string, form
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	results, err := st.QueryReadOnly(ctx, query)
 	if err != nil {
 		return err
@@ -480,7 +480,7 @@ func (a *App) runUsers(ctx context.Context, configPath string, args []string, fo
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	results, err := st.Users(ctx, coalesce(*workspaceID, cfg.WorkspaceID), query, 100)
 	if err != nil {
 		return err
@@ -512,7 +512,7 @@ func (a *App) runChannels(ctx context.Context, configPath string, args []string,
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	results, err := st.ChannelsByKind(ctx, coalesce(*workspaceID, cfg.WorkspaceID), query, resolvedKind, 100)
 	if err != nil {
 		return err
@@ -536,7 +536,7 @@ func (a *App) runTail(ctx context.Context, configPath string, args []string) err
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	repairDuration, err := time.ParseDuration(*repairEvery)
 	if err != nil {
 		return err
@@ -577,7 +577,7 @@ func (a *App) runWatch(ctx context.Context, configPath string, args []string, fo
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	syncOnce := func() error {
 		summary, err := syncer.Run(ctx, cfg, st, syncer.Options{Source: syncer.SourceDesktop})
@@ -633,7 +633,7 @@ func (a *App) runDigest(ctx context.Context, configPath string, args []string, f
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	digest, err := report.BuildDigest(ctx, st, report.DigestOptions{
 		Since:       lookback,
 		WorkspaceID: coalesce(*workspaceID, cfg.WorkspaceID),
@@ -681,7 +681,7 @@ func (a *App) runReport(ctx context.Context, configPath string, format OutputFor
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	activity, err := report.Build(ctx, st, report.Options{})
 	if err != nil {
 		return err
@@ -902,7 +902,7 @@ func (a *App) runPublish(ctx context.Context, configPath string, args []string, 
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	opts, err := shareOptions(*repoPath, *remote, *branch)
 	if err != nil {
@@ -990,7 +990,7 @@ func (a *App) runSubscribe(ctx context.Context, configPath string, args []string
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	opts, err := shareOptions(cfg.Share.RepoPath, cfg.Share.Remote, cfg.Share.Branch)
 	if err != nil {
 		return err
@@ -1032,7 +1032,7 @@ func (a *App) runUpdate(ctx context.Context, configPath string, args []string, f
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	opts, err := shareOptions(*repoPath, *remote, *branch)
 	if err != nil {
 		return err

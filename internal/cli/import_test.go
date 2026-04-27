@@ -67,7 +67,7 @@ func TestImportCommandJSON(t *testing.T) {
 
 	st, err = store.Open(dbPath)
 	require.NoError(t, err)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	rows, err := st.QueryReadOnly(ctx, `
 select ts, source_name, source_rank, text
@@ -95,6 +95,6 @@ func writeImportFixtureZip(t *testing.T, files map[string]string) string {
 	require.NoError(t, zw.Close())
 
 	zipPath := filepath.Join(t.TempDir(), "import-fixture.zip")
-	require.NoError(t, os.WriteFile(zipPath, buf.Bytes(), 0o644))
+	require.NoError(t, os.WriteFile(zipPath, buf.Bytes(), 0o600))
 	return zipPath
 }

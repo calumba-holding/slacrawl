@@ -14,7 +14,7 @@ func TestStoreRoundTrip(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := Open(dbPath)
 	require.NoError(t, err)
-	defer s.Close()
+	defer func() { require.NoError(t, s.Close()) }()
 
 	ctx := context.Background()
 	require.NoError(t, s.UpsertWorkspace(ctx, Workspace{
@@ -56,7 +56,7 @@ func TestUpsertMessageDeduplicatesMentions(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := Open(dbPath)
 	require.NoError(t, err)
-	defer s.Close()
+	defer func() { require.NoError(t, s.Close()) }()
 
 	ctx := context.Background()
 	require.NoError(t, s.UpsertMessage(ctx, Message{
@@ -84,7 +84,7 @@ func TestWorkspaceFiltersApplyToReadQueries(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := Open(dbPath)
 	require.NoError(t, err)
-	defer s.Close()
+	defer func() { require.NoError(t, s.Close()) }()
 
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -149,7 +149,7 @@ func TestOpenStampsSchemaVersion(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := Open(dbPath)
 	require.NoError(t, err)
-	defer s.Close()
+	defer func() { require.NoError(t, s.Close()) }()
 
 	var version int
 	require.NoError(t, s.DB().QueryRow("pragma user_version").Scan(&version))
@@ -173,7 +173,7 @@ func TestOpenCreatesReadPathIndexes(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := Open(dbPath)
 	require.NoError(t, err)
-	defer s.Close()
+	defer func() { require.NoError(t, s.Close()) }()
 
 	rows, err := s.QueryReadOnly(context.Background(), `
 select name

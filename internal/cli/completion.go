@@ -38,28 +38,6 @@ var (
 		"--help",
 		"-h",
 	}
-	commandFlags = map[string][]string{
-		"init":       {"--workspace", "--db", "--help", "-h"},
-		"doctor":     {"--help", "-h"},
-		"report":     {"--help", "-h"},
-		"digest":     {"--since", "--workspace", "--channel", "--top-n", "--help", "-h"},
-		"analytics":  {"digest", "quiet", "trends", "--help", "-h"},
-		"publish":    {"--repo", "--remote", "--branch", "--message", "--no-commit", "--push", "--help", "-h"},
-		"subscribe":  {"--repo", "--db", "--remote", "--branch", "--stale-after", "--no-auto-update", "--no-import", "--help", "-h"},
-		"update":     {"--repo", "--remote", "--branch", "--help", "-h"},
-		"sync":       {"--source", "--workspace", "--channels", "--since", "--full", "--latest-only", "--concurrency", "--help", "-h"},
-		"import":     {"--workspace", "--dry-run", "--force", "--format", "--help", "-h"},
-		"tail":       {"--workspace", "--repair-every", "--help", "-h"},
-		"watch":      {"--desktop-every", "--help", "-h"},
-		"search":     {"--workspace", "--help", "-h"},
-		"messages":   {"--workspace", "--channel", "--author", "--limit", "--help", "-h"},
-		"mentions":   {"--workspace", "--target", "--limit", "--help", "-h"},
-		"sql":        {"--help", "-h"},
-		"users":      {"--workspace", "--help", "-h"},
-		"channels":   {"--workspace", "--kind", "--help", "-h"},
-		"status":     {"--help", "-h"},
-		"completion": {"--help", "-h"},
-	}
 )
 
 func (a *App) runCompletion(args []string) error {

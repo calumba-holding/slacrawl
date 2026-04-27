@@ -41,6 +41,7 @@ func TestResolveTokensHonorsEnabledFlags(t *testing.T) {
 	require.Equal(t, "", tokens.User)
 }
 
+//nolint:gosec // Test values and environment variable names are not live secrets.
 func TestResolveTokensForWorkspace(t *testing.T) {
 	t.Setenv("SLACK_BOT_TOKEN", "xoxb-default")
 	t.Setenv("SLACK_APP_TOKEN", "xapp-default")

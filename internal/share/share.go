@@ -79,27 +79,27 @@ func EnsureRepo(ctx context.Context, opts Options) error {
 		return nil
 	}
 	if strings.TrimSpace(opts.Remote) != "" {
-		if err := os.MkdirAll(filepath.Dir(opts.RepoPath), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(opts.RepoPath), 0o750); err != nil {
 			return fmt.Errorf("mkdir share parent: %w", err)
 		}
-		if err := run(ctx, "", "git", "clone", opts.Remote, opts.RepoPath); err != nil {
+		if err := gitRun(ctx, "", "clone", opts.Remote, opts.RepoPath); err != nil {
 			return err
 		}
 		if branch := normalizeBranch(opts.Branch); branch != "" {
-			if err := run(ctx, opts.RepoPath, "git", "checkout", "-B", branch); err != nil {
+			if err := gitRun(ctx, opts.RepoPath, "checkout", "-B", branch); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
-	if err := os.MkdirAll(opts.RepoPath, 0o755); err != nil {
+	if err := os.MkdirAll(opts.RepoPath, 0o750); err != nil {
 		return fmt.Errorf("mkdir share repo: %w", err)
 	}
-	if err := run(ctx, opts.RepoPath, "git", "init"); err != nil {
+	if err := gitRun(ctx, opts.RepoPath, "init"); err != nil {
 		return err
 	}
 	if branch := normalizeBranch(opts.Branch); branch != "" {
-		if err := run(ctx, opts.RepoPath, "git", "checkout", "-B", branch); err != nil {
+		if err := gitRun(ctx, opts.RepoPath, "checkout", "-B", branch); err != nil {
 			return err
 		}
 	}
@@ -113,22 +113,22 @@ func Pull(ctx context.Context, opts Options) error {
 	if err := EnsureRepo(ctx, opts); err != nil {
 		return err
 	}
-	if err := run(ctx, opts.RepoPath, "git", "fetch", "--prune", "origin"); err != nil {
+	if err := gitRun(ctx, opts.RepoPath, "fetch", "--prune", "origin"); err != nil {
 		return err
 	}
 	branch := normalizeBranch(opts.Branch)
 	remoteRef := "refs/remotes/origin/" + branch
-	if _, err := output(ctx, opts.RepoPath, "git", "rev-parse", "--verify", remoteRef); err != nil {
-		return run(ctx, opts.RepoPath, "git", "checkout", "-B", branch)
+	if _, err := gitOutput(ctx, opts.RepoPath, "rev-parse", "--verify", remoteRef); err != nil {
+		return gitRun(ctx, opts.RepoPath, "checkout", "-B", branch)
 	}
-	return run(ctx, opts.RepoPath, "git", "checkout", "-B", branch, "origin/"+branch)
+	return gitRun(ctx, opts.RepoPath, "checkout", "-B", branch, "origin/"+branch)
 }
 
 func Commit(ctx context.Context, opts Options, message string) (bool, error) {
-	if err := run(ctx, opts.RepoPath, "git", "add", "."); err != nil {
+	if err := gitRun(ctx, opts.RepoPath, "add", "."); err != nil {
 		return false, err
 	}
-	out, err := output(ctx, opts.RepoPath, "git", "status", "--porcelain")
+	out, err := gitOutput(ctx, opts.RepoPath, "status", "--porcelain")
 	if err != nil {
 		return false, err
 	}
@@ -138,7 +138,7 @@ func Commit(ctx context.Context, opts Options, message string) (bool, error) {
 	if strings.TrimSpace(message) == "" {
 		message = "sync: slack archive"
 	}
-	if err := run(ctx, opts.RepoPath, "git",
+	if err := gitRun(ctx, opts.RepoPath,
 		"-c", "commit.gpgsign=false",
 		"-c", "user.name=slacrawl",
 		"-c", "user.email=slacrawl@example.invalid",
@@ -151,17 +151,17 @@ func Commit(ctx context.Context, opts Options, message string) (bool, error) {
 
 func Push(ctx context.Context, opts Options) error {
 	branch := normalizeBranch(opts.Branch)
-	out, err := output(ctx, opts.RepoPath, "git", "push", "-u", "origin", branch)
+	out, err := gitOutput(ctx, opts.RepoPath, "push", "-u", "origin", branch)
 	if err == nil {
 		return nil
 	}
 	if !isNonFastForwardPush(out) {
 		return fmt.Errorf("git push -u origin %s: %w\n%s", branch, err, strings.TrimSpace(out))
 	}
-	if pullErr := run(ctx, opts.RepoPath, "git", "pull", "--rebase", "--autostash", "origin", branch); pullErr != nil {
+	if pullErr := gitRun(ctx, opts.RepoPath, "pull", "--rebase", "--autostash", "origin", branch); pullErr != nil {
 		return fmt.Errorf("rebase before push retry: %w", pullErr)
 	}
-	return run(ctx, opts.RepoPath, "git", "push", "-u", "origin", branch)
+	return gitRun(ctx, opts.RepoPath, "push", "-u", "origin", branch)
 }
 
 func Export(ctx context.Context, s *store.Store, opts Options) (Manifest, error) {
@@ -172,7 +172,7 @@ func Export(ctx context.Context, s *store.Store, opts Options) (Manifest, error)
 	if err := os.RemoveAll(dataDir); err != nil {
 		return Manifest{}, fmt.Errorf("reset tables dir: %w", err)
 	}
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
 		return Manifest{}, fmt.Errorf("mkdir tables dir: %w", err)
 	}
 	manifest := Manifest{
@@ -218,7 +218,7 @@ func Import(ctx context.Context, s *store.Store, opts Options) (Manifest, error)
 	}
 	for i := len(SnapshotTables) - 1; i >= 0; i-- {
 		table := SnapshotTables[i]
-		if _, err := tx.ExecContext(ctx, "delete from "+quoteIdent(table)); err != nil {
+		if _, err := tx.ExecContext(ctx, "delete from "+quoteIdent(table)); err != nil { //nolint:gosec // Snapshot table names are quoted identifiers from the fixed schema list.
 			return Manifest{}, fmt.Errorf("clear %s: %w", table, err)
 		}
 	}
@@ -312,7 +312,7 @@ func ReadSyncState(ctx context.Context, s *store.Store) (SyncState, error) {
 }
 
 func ReadManifest(repoPath string) (Manifest, error) {
-	data, err := os.ReadFile(filepath.Join(repoPath, ManifestName))
+	data, err := os.ReadFile(filepath.Join(repoPath, ManifestName)) //nolint:gosec // Repo path is explicit user configuration.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return Manifest{}, ErrNoManifest
@@ -330,7 +330,7 @@ func ReadManifest(repoPath string) (Manifest, error) {
 }
 
 func exportTable(ctx context.Context, db *sql.DB, dataDir, table string) (TableManifest, error) {
-	rows, err := db.QueryContext(ctx, "select * from "+quoteIdent(table))
+	rows, err := db.QueryContext(ctx, "select * from "+quoteIdent(table)) //nolint:gosec // Table names are emitted through quoteIdent from export metadata.
 	if err != nil {
 		return TableManifest{}, fmt.Errorf("query %s: %w", table, err)
 	}
@@ -341,7 +341,7 @@ func exportTable(ctx context.Context, db *sql.DB, dataDir, table string) (TableM
 		return TableManifest{}, fmt.Errorf("columns %s: %w", table, err)
 	}
 	tableDir := filepath.Join(dataDir, table)
-	if err := os.MkdirAll(tableDir, 0o755); err != nil {
+	if err := os.MkdirAll(tableDir, 0o750); err != nil {
 		return TableManifest{}, fmt.Errorf("mkdir %s: %w", table, err)
 	}
 	writer := tableShardWriter{dataDir: dataDir, table: table}
@@ -414,7 +414,7 @@ func importTable(ctx context.Context, tx *sql.Tx, repoPath string, table TableMa
 
 func importTableFile(ctx context.Context, stmt *sql.Stmt, repoPath string, table TableManifest, rel string) error {
 	path := filepath.Join(repoPath, filepath.FromSlash(rel))
-	file, err := os.Open(path)
+	file, err := os.Open(path) //nolint:gosec // Import reads files from the configured backup repo.
 	if err != nil {
 		return fmt.Errorf("open %s: %w", rel, err)
 	}
@@ -460,7 +460,7 @@ type tableShardWriter struct {
 func (w *tableShardWriter) open() error {
 	rel := filepath.ToSlash(filepath.Join("tables", w.table, fmt.Sprintf("%06d.jsonl.gz", w.nextShard)))
 	path := filepath.Join(w.dataDir, w.table, fmt.Sprintf("%06d.jsonl.gz", w.nextShard))
-	file, err := os.Create(path)
+	file, err := os.Create(path) //nolint:gosec // Export creates files below the configured backup repo.
 	if err != nil {
 		return fmt.Errorf("create %s: %w", rel, err)
 	}
@@ -574,16 +574,17 @@ func normalizeBranch(branch string) string {
 	return strings.TrimSpace(branch)
 }
 
-func run(ctx context.Context, dir, name string, args ...string) error {
-	out, err := output(ctx, dir, name, args...)
+func gitRun(ctx context.Context, dir string, args ...string) error {
+	out, err := gitOutput(ctx, dir, args...)
 	if err != nil {
-		return fmt.Errorf("%s %s: %w\n%s", name, strings.Join(args, " "), err, strings.TrimSpace(out))
+		return fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, strings.TrimSpace(out))
 	}
 	return nil
 }
 
-func output(ctx context.Context, dir, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+	//nolint:gosec // This helper only invokes git with caller-controlled subcommands.
+	cmd := exec.CommandContext(ctx, "git", args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}

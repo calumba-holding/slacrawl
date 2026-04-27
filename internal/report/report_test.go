@@ -15,7 +15,7 @@ func TestBuildReport(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "report.db")
 	st, err := store.Open(dbPath)
 	require.NoError(t, err)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	ctx := context.Background()
 	now := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)

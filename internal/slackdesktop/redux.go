@@ -99,8 +99,13 @@ type reduxBlobRef struct {
 	UserID      string
 }
 
+func nodeAvailable() bool {
+	_, err := exec.LookPath("node")
+	return err == nil
+}
+
 func ExtractIndexedDBStates(path string) ([]ReduxDecodedState, error) {
-	if _, err := exec.LookPath("node"); err != nil {
+	if !nodeAvailable() {
 		return nil, nil
 	}
 
@@ -267,7 +272,7 @@ func scanReduxBlobRefs(blobRoot string) ([]reduxBlobRef, error) {
 }
 
 func decodeReduxBlob(blobPath string) (ReduxDecodedState, error) {
-	raw, err := os.ReadFile(blobPath)
+	raw, err := os.ReadFile(blobPath) //nolint:gosec // Blob path is discovered inside the Slack IndexedDB directory.
 	if err != nil {
 		return ReduxDecodedState{}, err
 	}
@@ -290,7 +295,7 @@ func decodeReduxBlob(blobPath string) (ReduxDecodedState, error) {
 		return ReduxDecodedState{}, err
 	}
 	tempPath := tempFile.Name()
-	defer os.Remove(tempPath)
+	defer func() { _ = os.Remove(tempPath) }()
 	if _, err := tempFile.Write(decoded[offset:]); err != nil {
 		_ = tempFile.Close()
 		return ReduxDecodedState{}, err
@@ -299,7 +304,7 @@ func decodeReduxBlob(blobPath string) (ReduxDecodedState, error) {
 		return ReduxDecodedState{}, err
 	}
 
-	cmd := exec.Command("node", "-e", reduxDecoderScript, tempPath)
+	cmd := exec.Command("node", "-e", reduxDecoderScript, tempPath) //nolint:gosec // Node decodes a temporary V8 payload copied from the Slack data directory.
 	output, err := cmd.Output()
 	if err != nil {
 		return ReduxDecodedState{}, err

@@ -33,7 +33,7 @@ func TestSyncHandlesRateLimitAndThreadCoverage(t *testing.T) {
 	client.now = func() time.Time { return time.Date(2026, 3, 8, 1, 2, 3, 0, time.UTC) }
 
 	st := mustStore(t)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	err := client.Sync(context.Background(), st, SyncOptions{})
 	require.NoError(t, err)
@@ -66,7 +66,7 @@ func TestSyncWithoutUserTokenMarksPartialCoverage(t *testing.T) {
 	client.sleep = func(context.Context, time.Duration) error { return nil }
 
 	st := mustStore(t)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	err := client.Sync(context.Background(), st, SyncOptions{})
 	require.NoError(t, err)
@@ -87,7 +87,7 @@ func TestSyncIncludesDMsAndMPIMsWhenEnabled(t *testing.T) {
 	client.sleep = func(context.Context, time.Duration) error { return nil }
 
 	st := mustStore(t)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	err := client.Sync(context.Background(), st, SyncOptions{})
 	require.NoError(t, err)
@@ -128,7 +128,7 @@ func TestSyncSkipsDMsWhenDisabled(t *testing.T) {
 	client.sleep = func(context.Context, time.Duration) error { return nil }
 
 	st := mustStore(t)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	err := client.Sync(context.Background(), st, SyncOptions{})
 	require.NoError(t, err)
@@ -152,7 +152,7 @@ func TestSyncWithInvalidUserTokenStillMarksPartialCoverage(t *testing.T) {
 	client.sleep = func(context.Context, time.Duration) error { return nil }
 
 	st := mustStore(t)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	err := client.Sync(context.Background(), st, SyncOptions{})
 	require.NoError(t, err)
@@ -232,7 +232,7 @@ func TestSyncSkipsChannelsTheBotCannotRead(t *testing.T) {
 	client.sleep = func(context.Context, time.Duration) error { return nil }
 
 	st := mustStore(t)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	err := client.Sync(context.Background(), st, SyncOptions{})
 	require.NoError(t, err)
@@ -257,7 +257,7 @@ func TestSyncUsesConfiguredConcurrencyForChannelHistory(t *testing.T) {
 	client.sleep = func(context.Context, time.Duration) error { return nil }
 
 	st := mustStore(t)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	err := client.Sync(context.Background(), st, SyncOptions{Concurrency: 2})
 	require.NoError(t, err)
@@ -278,7 +278,7 @@ func TestSyncJoinsPublicChannelBeforeRetryingHistory(t *testing.T) {
 	client.sleep = func(context.Context, time.Duration) error { return nil }
 
 	st := mustStore(t)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	err := client.Sync(context.Background(), st, SyncOptions{})
 	require.NoError(t, err)
@@ -304,7 +304,7 @@ func TestSyncDefaultsToIncrementalHistoryWhenNotFull(t *testing.T) {
 	client.now = func() time.Time { return time.Date(2026, 3, 8, 4, 0, 0, 0, time.UTC) }
 
 	st := mustStore(t)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	ctx := context.Background()
 	require.NoError(t, st.UpsertWorkspace(ctx, store.Workspace{
@@ -341,7 +341,7 @@ func TestSyncDefaultsToIncrementalHistoryWhenNotFull(t *testing.T) {
 
 func TestHandleEventsAPIEventUpdatesStore(t *testing.T) {
 	st := mustStore(t)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	ctx := context.Background()
 	now := time.Date(2026, 3, 8, 3, 0, 0, 0, time.UTC)
@@ -408,7 +408,7 @@ func TestHandleEventsAPIEventUpdatesStore(t *testing.T) {
 
 func TestHandleSocketModeEventAcksAndPersists(t *testing.T) {
 	st := mustStore(t)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	ctx := context.Background()
 	now := time.Date(2026, 3, 8, 3, 30, 0, 0, time.UTC)
@@ -466,7 +466,7 @@ func TestRepairWorkspaceReconcilesIncrementalHistory(t *testing.T) {
 	client.now = func() time.Time { return time.Date(2026, 3, 8, 4, 0, 0, 0, time.UTC) }
 
 	st := mustStore(t)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	ctx := context.Background()
 	require.NoError(t, st.UpsertWorkspace(ctx, store.Workspace{
@@ -675,7 +675,7 @@ func newInvalidUserSlackServer(t *testing.T) *mockSlackServer {
 		auth := r.Header.Get("Authorization")
 		switch r.URL.Path {
 		case "/auth.test":
-			if strings.Contains(auth, "xoxp-invalid") || token == "xoxp-invalid" {
+			if strings.Contains(auth, "xoxp-invalid") || token == "xoxp-invalid" { //nolint:gosec // Test token sentinel, not a real credential.
 				_, _ = w.Write([]byte(`{"ok":false,"error":"invalid_auth"}`))
 				return
 			}
@@ -719,7 +719,8 @@ func newConcurrentHistorySlackServer(t *testing.T) *mockSlackServer {
 			mock.mu.Lock()
 			mock.activeHistory--
 			mock.mu.Unlock()
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"ok":true,"messages":[{"type":"message","channel":"%s","user":"U123","text":"msg-%s","ts":"1710000000.000100"}],"response_metadata":{"next_cursor":""}}`, channel, channel)))
+			//nolint:gosec // Test server echoes controlled query values.
+			_, _ = fmt.Fprintf(w, `{"ok":true,"messages":[{"type":"message","channel":"%s","user":"U123","text":"msg-%s","ts":"1710000000.000100"}],"response_metadata":{"next_cursor":""}}`, channel, channel)
 		case "/users.list":
 			_, _ = w.Write([]byte(`{"ok":true,"members":[],"response_metadata":{"next_cursor":""}}`))
 		default:
@@ -831,7 +832,7 @@ func TestMessageFromEventPreservesDeleteAndThreadFields(t *testing.T) {
 
 func TestHandleEventsAPIEventIgnoresUnknown(t *testing.T) {
 	st := mustStore(t)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	client := New(config.Tokens{Bot: "xoxb-test"})
 	require.NoError(t, client.HandleEventsAPIEvent(context.Background(), st, "T123", slackevents.EventsAPIEvent{}))
@@ -839,7 +840,7 @@ func TestHandleEventsAPIEventIgnoresUnknown(t *testing.T) {
 
 func TestChannelSyncPlanLatestOnlySkipsUnsyncedChannels(t *testing.T) {
 	st := mustStore(t)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	now := time.Date(2026, 3, 8, 1, 2, 3, 0, time.UTC)
 	require.NoError(t, st.UpsertChannel(context.Background(), store.Channel{

@@ -16,7 +16,7 @@ func TestBuildTrends(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "trends.db")
 	st, err := store.Open(dbPath)
 	require.NoError(t, err)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	ctx := context.Background()
 	now := time.Unix(1776852000, 0).UTC() // 2026-04-22T12:00:00Z
@@ -75,7 +75,7 @@ func TestBuildTrendsIncludesRequestedQuietChannel(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "trends-quiet.db")
 	st, err := store.Open(dbPath)
 	require.NoError(t, err)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	ctx := context.Background()
 	now := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)

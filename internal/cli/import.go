@@ -93,13 +93,13 @@ func (a *App) runImport(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ex, err := importer.Open(fs.Arg(0))
 	if err != nil {
 		return err
 	}
-	defer ex.Close()
+	defer func() { _ = ex.Close() }()
 
 	started := time.Now().UTC()
 	report, progress, err := runImportExecution(ctx, st, ex, strings.TrimSpace(*workspace), *dryRun, *force)
@@ -181,7 +181,6 @@ func runImportExecution(ctx context.Context, st *store.Store, ex *importer.Expor
 			candidates = append(candidates, channel.ID)
 		}
 
-		matchedChannelDir := false
 		for _, candidate := range candidates {
 			channelRows := 0
 			for env, iterErr := range ex.Messages(candidate) {
@@ -214,12 +213,8 @@ func runImportExecution(ctx context.Context, st *store.Store, ex *importer.Expor
 				}
 			}
 			if channelRows > 0 {
-				matchedChannelDir = true
 				break
 			}
-		}
-		if !matchedChannelDir {
-			// Directory may be absent in partial exports; keep channel metadata only.
 		}
 		progress = append(progress, row)
 	}

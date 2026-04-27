@@ -25,7 +25,7 @@ func (a *App) runAnalytics(ctx context.Context, configPath string, args []string
 	case "trends":
 		return a.runAnalyticsTrends(ctx, configPath, subArgs, format)
 	default:
-		return fmt.Errorf("unknown analytics subcommand: %s. Known: digest, quiet, trends.", subcommand)
+		return fmt.Errorf("unknown analytics subcommand: %s; known: digest, quiet, trends", subcommand)
 	}
 }
 
@@ -66,7 +66,7 @@ func (a *App) runAnalyticsQuiet(ctx context.Context, configPath string, args []s
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	quiet, err := report.BuildQuiet(ctx, st, report.QuietOptions{
 		Since:       lookback,
@@ -106,7 +106,7 @@ func (a *App) runAnalyticsTrends(ctx context.Context, configPath string, args []
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	trends, err := report.BuildTrends(ctx, st, report.TrendsOptions{
 		Weeks:       *weeks,

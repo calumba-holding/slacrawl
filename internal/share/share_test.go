@@ -16,7 +16,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 
 	source := seedStore(t, filepath.Join(dir, "source.db"))
-	defer source.Close()
+	defer func() { require.NoError(t, source.Close()) }()
 
 	opts := Options{RepoPath: filepath.Join(dir, "share"), Branch: "main"}
 	manifest, err := Export(ctx, source, opts)
@@ -27,7 +27,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 
 	reader, err := store.Open(filepath.Join(dir, "reader.db"))
 	require.NoError(t, err)
-	defer reader.Close()
+	defer func() { require.NoError(t, reader.Close()) }()
 
 	imported, err := Import(ctx, reader, opts)
 	require.NoError(t, err)
@@ -44,7 +44,7 @@ func TestImportIfChangedSkipsCurrentManifest(t *testing.T) {
 	dir := t.TempDir()
 
 	source := seedStore(t, filepath.Join(dir, "source.db"))
-	defer source.Close()
+	defer func() { require.NoError(t, source.Close()) }()
 
 	opts := Options{RepoPath: filepath.Join(dir, "share"), Branch: "main"}
 	manifest, err := Export(ctx, source, opts)
@@ -52,7 +52,7 @@ func TestImportIfChangedSkipsCurrentManifest(t *testing.T) {
 
 	reader, err := store.Open(filepath.Join(dir, "reader.db"))
 	require.NoError(t, err)
-	defer reader.Close()
+	defer func() { require.NoError(t, reader.Close()) }()
 
 	imported, changed, err := ImportIfChanged(ctx, reader, opts)
 	require.NoError(t, err)
@@ -68,7 +68,7 @@ func TestNeedsImportUsesLastImportTime(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	s := seedStore(t, filepath.Join(dir, "source.db"))
-	defer s.Close()
+	defer func() { require.NoError(t, s.Close()) }()
 
 	require.True(t, NeedsImport(ctx, s, time.Hour))
 

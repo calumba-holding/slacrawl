@@ -61,14 +61,14 @@ func TestParseLocalStorage(t *testing.T) {
 
 func TestIngestDesktopState(t *testing.T) {
 	root := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "storage"), 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "Local Storage", "leveldb"), 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "IndexedDB", "https_app.slack.com_0.indexeddb.leveldb"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "storage"), 0o750))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "Local Storage", "leveldb"), 0o750))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "IndexedDB", "https_app.slack.com_0.indexeddb.leveldb"), 0o750))
 
 	rootStatePath := filepath.Join(root, "storage", "root-state.json")
 	rootStateData, err := os.ReadFile(filepath.Join("..", "..", "testdata", "desktop", "root-state.json"))
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(rootStatePath, rootStateData, 0o644))
+	require.NoError(t, os.WriteFile(rootStatePath, rootStateData, 0o600))
 
 	localDB, err := leveldb.OpenFile(filepath.Join(root, "Local Storage", "leveldb"), nil)
 	require.NoError(t, err)
@@ -87,7 +87,7 @@ func TestIngestDesktopState(t *testing.T) {
 
 	st, err := store.Open(filepath.Join(t.TempDir(), "slacrawl.db"))
 	require.NoError(t, err)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	source, err := Ingest(context.Background(), st, root)
 	require.NoError(t, err)
@@ -125,10 +125,11 @@ func TestExtractIndexedDBStates(t *testing.T) {
 	}
 
 	root := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "IndexedDB", "https_app.slack.com_0.indexeddb.leveldb"), 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "IndexedDB", "https_app.slack.com_0.indexeddb.blob", "1", "cd"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "IndexedDB", "https_app.slack.com_0.indexeddb.leveldb"), 0o750))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "IndexedDB", "https_app.slack.com_0.indexeddb.blob", "1", "cd"), 0o750))
 
 	payloadPath := filepath.Join(root, "redux.bin")
+	//nolint:gosec // Test builds a controlled V8 fixture with node.
 	cmd := exec.Command("node", "-e", `
 const fs = require("fs");
 const v8 = require("v8");
@@ -189,10 +190,10 @@ fs.writeFileSync(process.argv[1], v8.serialize(value));
 `, payloadPath)
 	require.NoError(t, cmd.Run())
 
-	serialized, err := os.ReadFile(payloadPath)
+	serialized, err := os.ReadFile(payloadPath) //nolint:gosec // Test reads the payload it just wrote to t.TempDir.
 	require.NoError(t, err)
 	blobPayload := append([]byte{0xff, 0x11, 0x02}, snappy.Encode(nil, serialized)...)
-	require.NoError(t, os.WriteFile(filepath.Join(root, "IndexedDB", "https_app.slack.com_0.indexeddb.blob", "1", "cd", "cd9a"), blobPayload, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "IndexedDB", "https_app.slack.com_0.indexeddb.blob", "1", "cd", "cd9a"), blobPayload, 0o600))
 
 	states, err := ExtractIndexedDBStates(root)
 	require.NoError(t, err)
@@ -214,13 +215,13 @@ fs.writeFileSync(process.argv[1], v8.serialize(value));
 
 func TestInspectIncludesSnapshotDerivedDesktopSummaries(t *testing.T) {
 	root := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "storage"), 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "Local Storage", "leveldb"), 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "IndexedDB", "https_app.slack.com_0.indexeddb.leveldb"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "storage"), 0o750))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "Local Storage", "leveldb"), 0o750))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "IndexedDB", "https_app.slack.com_0.indexeddb.leveldb"), 0o750))
 
 	rootStateData, err := os.ReadFile(filepath.Join("..", "..", "testdata", "desktop", "root-state.json"))
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(root, "storage", "root-state.json"), rootStateData, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "storage", "root-state.json"), rootStateData, 0o600))
 
 	localDB, err := leveldb.OpenFile(filepath.Join(root, "Local Storage", "leveldb"), nil)
 	require.NoError(t, err)

@@ -11,8 +11,6 @@ import (
 	"github.com/vincentkoc/slacrawl/internal/store"
 )
 
-const secondsPerWeek = int64(7 * 24 * 60 * 60)
-
 // TrendsOptions controls how a Trends report is built.
 type TrendsOptions struct {
 	Now         time.Time

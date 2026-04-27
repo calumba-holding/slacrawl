@@ -80,6 +80,7 @@ type Tokens struct {
 	User string
 }
 
+//nolint:gosec // TokenEnv fields are environment variable names, not secret values.
 func Default() Config {
 	base := "~/" + defaultDirName
 	return Config{
@@ -123,7 +124,7 @@ func DefaultConfigPath() (string, error) {
 }
 
 func Load(path string) (Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // Users choose the config path explicitly.
 	if err != nil {
 		return Config{}, err
 	}
@@ -142,14 +143,14 @@ func (c Config) Save(path string) error {
 	if err := c.Normalize(); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	data, err := toml.Marshal(c)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 func (c *Config) Normalize() error {
@@ -295,7 +296,7 @@ func EnsureRuntimeDirs(c Config) error {
 		if path == "" {
 			continue
 		}
-		if err := os.MkdirAll(path, 0o755); err != nil {
+		if err := os.MkdirAll(path, 0o750); err != nil {
 			return err
 		}
 	}

@@ -58,7 +58,7 @@ func TestDigestCommandJSON(t *testing.T) {
 
 	st, err := store.Open(dbPath)
 	require.NoError(t, err)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 	now := time.Now().UTC()
 	makeTS := func(offset time.Duration, micros int) string {
 		return fmt.Sprintf("%d.%06d", now.Add(-offset).Unix(), micros)
@@ -416,9 +416,9 @@ func TestNoColorFlagDisablesANSIOnTTYWriter(t *testing.T) {
 	configPath := filepath.Join(tmp, "config.toml")
 	dbPath := filepath.Join(tmp, "slacrawl.db")
 
-	file, err := os.Create(filepath.Join(tmp, "stdout.txt"))
+	file, err := os.Create(filepath.Join(tmp, "stdout.txt")) //nolint:gosec // Test creates a file inside t.TempDir.
 	require.NoError(t, err)
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	app := &App{
 		Stdout: file,
@@ -430,7 +430,7 @@ func TestNoColorFlagDisablesANSIOnTTYWriter(t *testing.T) {
 	require.NoError(t, app.Run(ctx, []string{"--config", configPath, "--no-color", "status"}))
 	require.NoError(t, file.Close())
 
-	data, err := os.ReadFile(filepath.Join(tmp, "stdout.txt"))
+	data, err := os.ReadFile(filepath.Join(tmp, "stdout.txt")) //nolint:gosec // Test reads a file inside t.TempDir.
 	require.NoError(t, err)
 	require.NotContains(t, string(data), "\x1b[")
 }
@@ -603,7 +603,7 @@ func seedArchiveStore(t *testing.T, dbPath string, message string) {
 	t.Helper()
 	st, err := store.Open(dbPath)
 	require.NoError(t, err)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	now := mustTime(t, "2026-03-08T18:20:43Z")
 	require.NoError(t, st.UpsertWorkspace(context.Background(), store.Workspace{ID: "T1", Name: "one", RawJSON: "{}", UpdatedAt: now}))
@@ -627,7 +627,7 @@ func appendArchiveMessage(t *testing.T, dbPath string, message string) {
 	t.Helper()
 	st, err := store.Open(dbPath)
 	require.NoError(t, err)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	now := mustTime(t, "2026-03-08T19:20:43Z")
 	require.NoError(t, st.UpsertMessage(context.Background(), store.Message{
@@ -646,6 +646,7 @@ func appendArchiveMessage(t *testing.T, dbPath string, message string) {
 
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
+	//nolint:gosec // Tests execute git with controlled arguments.
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),

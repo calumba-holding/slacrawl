@@ -16,7 +16,7 @@ func TestExportZIPMode(t *testing.T) {
 	zipPath := writeFixtureZIP(t, fullFixtureFiles())
 	ex, err := Open(zipPath)
 	require.NoError(t, err)
-	defer ex.Close()
+	defer func() { require.NoError(t, ex.Close()) }()
 
 	users, err := ex.Users()
 	require.NoError(t, err)
@@ -62,7 +62,7 @@ func TestExportDirectoryModeWithMissingOptionalFiles(t *testing.T) {
 	dir := writeFixtureDir(t, minimalFixtureFiles())
 	ex, err := Open(dir)
 	require.NoError(t, err)
-	defer ex.Close()
+	defer func() { require.NoError(t, ex.Close()) }()
 
 	channels, err := ex.Channels()
 	require.NoError(t, err)
@@ -88,7 +88,7 @@ func TestMalformedJSON(t *testing.T) {
 
 	ex, err := Open(zipPath)
 	require.NoError(t, err)
-	defer ex.Close()
+	defer func() { require.NoError(t, ex.Close()) }()
 
 	_, err = ex.Channels()
 	require.Error(t, err)
@@ -102,7 +102,7 @@ func TestMalformedMessagesJSON(t *testing.T) {
 
 	ex, err := Open(dir)
 	require.NoError(t, err)
-	defer ex.Close()
+	defer func() { require.NoError(t, ex.Close()) }()
 
 	messages, iterErr := collectMessages(ex, "general")
 	require.Error(t, iterErr)
@@ -114,7 +114,7 @@ func TestMissingChannelDirectoryDoesNotError(t *testing.T) {
 	dir := writeFixtureDir(t, minimalFixtureFiles())
 	ex, err := Open(dir)
 	require.NoError(t, err)
-	defer ex.Close()
+	defer func() { require.NoError(t, ex.Close()) }()
 
 	messages, iterErr := collectMessages(ex, "does-not-exist")
 	require.NoError(t, iterErr)
@@ -145,7 +145,7 @@ func writeFixtureZIP(t *testing.T, files map[string]string) string {
 	require.NoError(t, zw.Close())
 
 	path := filepath.Join(t.TempDir(), "fixture.zip")
-	require.NoError(t, os.WriteFile(path, buf.Bytes(), 0o644))
+	require.NoError(t, os.WriteFile(path, buf.Bytes(), 0o600))
 	return path
 }
 
@@ -154,8 +154,8 @@ func writeFixtureDir(t *testing.T, files map[string]string) string {
 	dir := t.TempDir()
 	for name, content := range files {
 		fullPath := filepath.Join(dir, filepath.FromSlash(name))
-		require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0o755))
-		require.NoError(t, os.WriteFile(fullPath, []byte(content), 0o644))
+		require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0o750))
+		require.NoError(t, os.WriteFile(fullPath, []byte(content), 0o600))
 	}
 	return dir
 }
@@ -200,7 +200,7 @@ func minimalFixtureFiles() map[string]string {
 
 func TestOpenRejectsUnknownFileType(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "plain.txt")
-	require.NoError(t, os.WriteFile(path, []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(path, []byte("x"), 0o600))
 	_, err := Open(path)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unsupported export path")

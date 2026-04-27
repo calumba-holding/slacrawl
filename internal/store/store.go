@@ -253,7 +253,7 @@ type SyncStateRow struct {
 }
 
 func Open(path string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, err
 	}
 	db, err := sql.Open("sqlite", path)
@@ -491,7 +491,7 @@ limit ?
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanMessageRows(rows)
 }
 
@@ -519,7 +519,7 @@ where 1=1`
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanMessageRows(rows)
 }
 
@@ -544,7 +544,7 @@ where 1=1`
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []MentionRow
 	for rows.Next() {
@@ -566,7 +566,7 @@ func (s *Store) QueryReadOnly(ctx context.Context, query string) ([]map[string]a
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	cols, err := rows.Columns()
 	if err != nil {
@@ -603,7 +603,7 @@ limit ?
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []UserRow
 	for rows.Next() {
 		var row UserRow
@@ -632,7 +632,7 @@ limit ?
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []ChannelRow
 	for rows.Next() {
 		var row ChannelRow
@@ -656,7 +656,7 @@ order by c.id asc
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []ChannelSyncCursor
 	for rows.Next() {
@@ -711,7 +711,7 @@ limit ?
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []SyncStateRow
 	for rows.Next() {

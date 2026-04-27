@@ -343,15 +343,6 @@ func (c *Client) fetchChannels(ctx context.Context, workspaceID string) ([]slack
 	}
 }
 
-func (c *Client) syncChannelMessages(ctx context.Context, st *store.Store, workspaceID string, channel slack.Channel, oldest string, now time.Time, userRepliesAvailable bool) error {
-	return c.syncChannelMessagesWithSource(ctx, st, workspaceID, channel, oldest, now, userRepliesAvailable, channelSyncSource{
-		historyClient: c.bot,
-		sourceName:    SourceBot,
-		sourceRank:    2,
-		allowJoin:     true,
-	})
-}
-
 func (c *Client) syncChannelMessagesWithSource(ctx context.Context, st *store.Store, workspaceID string, channel slack.Channel, oldest string, now time.Time, userRepliesAvailable bool, source channelSyncSource) error {
 	if source.historyClient == nil {
 		return errors.New("history client is required")
@@ -675,7 +666,7 @@ type managedSocketMode struct {
 
 func (m managedSocketMode) Run() error { return m.client.Run() }
 func (m managedSocketMode) Ack(req socketmode.Request, payload ...interface{}) {
-	m.client.Ack(req, payload...)
+	_ = m.client.Ack(req, payload...)
 }
 func (m managedSocketMode) Events() <-chan socketmode.Event { return m.client.Events }
 

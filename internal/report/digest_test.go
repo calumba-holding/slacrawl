@@ -16,7 +16,7 @@ func TestBuildDigest(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "digest.db")
 	st, err := store.Open(dbPath)
 	require.NoError(t, err)
-	defer st.Close()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	ctx := context.Background()
 	now := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
@@ -146,6 +146,7 @@ func tsEpoch(at time.Time, micros int) string {
 	return fmt.Sprintf("%d.%06d", at.UTC().Unix(), micros)
 }
 
+//nolint:unparam // shared test helper keeps workspace explicit across report tests.
 func addMsg(t *testing.T, ctx context.Context, st *store.Store, channelID, ts, workspaceID, userID, threadTS, text string) {
 	t.Helper()
 	require.NoError(t, st.UpsertMessage(ctx, store.Message{
