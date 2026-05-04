@@ -69,6 +69,7 @@ func (a *App) runAnalyticsQuiet(ctx context.Context, configPath string, args []s
 	defer func() { _ = st.Close() }()
 
 	quiet, err := report.BuildQuiet(ctx, st, report.QuietOptions{
+		Now:         a.nowUTC(),
 		Since:       lookback,
 		WorkspaceID: coalesce(*workspaceID, cfg.WorkspaceID),
 	})
@@ -109,6 +110,7 @@ func (a *App) runAnalyticsTrends(ctx context.Context, configPath string, args []
 	defer func() { _ = st.Close() }()
 
 	trends, err := report.BuildTrends(ctx, st, report.TrendsOptions{
+		Now:         a.nowUTC(),
 		Weeks:       *weeks,
 		WorkspaceID: coalesce(*workspaceID, cfg.WorkspaceID),
 		Channel:     *channel,

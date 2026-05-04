@@ -28,6 +28,7 @@ type App struct {
 
 	configPath   string
 	outputFormat OutputFormat
+	now          func() time.Time
 }
 
 type OutputFormat string
@@ -43,6 +44,13 @@ func New() *App {
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
 	}
+}
+
+func (a *App) nowUTC() time.Time {
+	if a.now != nil {
+		return a.now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 func (a *App) Run(ctx context.Context, args []string) error {
@@ -635,6 +643,7 @@ func (a *App) runDigest(ctx context.Context, configPath string, args []string, f
 	}
 	defer func() { _ = st.Close() }()
 	digest, err := report.BuildDigest(ctx, st, report.DigestOptions{
+		Now:         a.nowUTC(),
 		Since:       lookback,
 		WorkspaceID: coalesce(*workspaceID, cfg.WorkspaceID),
 		Channel:     *channel,
@@ -682,7 +691,7 @@ func (a *App) runReport(ctx context.Context, configPath string, format OutputFor
 		return err
 	}
 	defer func() { _ = st.Close() }()
-	activity, err := report.Build(ctx, st, report.Options{})
+	activity, err := report.Build(ctx, st, report.Options{Now: a.nowUTC()})
 	if err != nil {
 		return err
 	}

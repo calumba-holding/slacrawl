@@ -111,7 +111,8 @@ func TestAnalyticsTrendsCommand(t *testing.T) {
 	ctx := context.Background()
 	app, configPath, dbPath, stdout := setupAnalyticsApp(t)
 
-	now := time.Now().UTC()
+	now := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
+	app.now = func() time.Time { return now }
 	currentWeekStart := startOfWeekForTest(now)
 	seedCommonWorkspace(t, ctx, dbPath, now)
 
@@ -169,7 +170,8 @@ func TestAnalyticsTrendsCommandIncludesRequestedQuietChannel(t *testing.T) {
 	ctx := context.Background()
 	app, configPath, dbPath, stdout := setupAnalyticsApp(t)
 
-	now := time.Now().UTC()
+	now := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
+	app.now = func() time.Time { return now }
 	seedCommonWorkspace(t, ctx, dbPath, now)
 
 	st, err := store.Open(dbPath)

@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/golang/snappy v1.0.0
-	github.com/pelletier/go-toml/v2 v2.3.0
+	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/slack-go/slack v0.23.0
 	github.com/stretchr/testify v1.11.1
 	github.com/syndtr/goleveldb v1.0.0
