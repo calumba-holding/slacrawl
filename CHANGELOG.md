@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Bump routine Go module and GitHub Actions dependencies.
+
 - Add a repo-local `slacrawl` agent skill for local Slack archive, freshness,
   query, and verification workflows.
 - Document `slacrawl sql` read-only query examples in the repo-local agent
