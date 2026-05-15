@@ -4,6 +4,8 @@
 
 - Bump routine Go module and GitHub Actions dependencies.
 
+- Clarify in the public docs that future Slack file-blob backup must store Git-share media as gzip-compressed files, restore raw local cache files on import, and keep legacy raw-media import compatibility.
+
 - Add a repo-local `slacrawl` agent skill for local Slack archive, freshness,
   query, and verification workflows.
 - Document `slacrawl sql` read-only query examples in the repo-local agent

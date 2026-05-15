@@ -32,6 +32,10 @@ Desktop mode is still partial in a few areas:
 - attachment blobs are not downloaded
 - background file/media caches are not indexed as searchable attachments
 
+When file/blob backup is implemented, Git-share media must be stored as
+gzip-compressed snapshot files and imported back into the raw local cache layout
+with backward compatibility for older raw media entries.
+
 ## Path Detection
 
 On macOS, leave the desktop path blank to auto-detect:

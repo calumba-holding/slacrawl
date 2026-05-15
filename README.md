@@ -58,6 +58,11 @@ Data stays on your machine. You can run it in API mode, desktop mode, or a hybri
 - public Marketplace-style distribution hardening
 - desktop-local message extraction beyond the documented bootstrap surface
 
+When attachment blob backup is added, Git-share media must use gzip-compressed
+snapshot files and import must remain backward compatible with older raw media
+entries. Current `slacrawl` releases publish metadata tables only, so there is
+no raw media tree to migrate yet.
+
 If one of those gaps matters to your workflow, open an issue so it can be tracked explicitly.
 
 ## Requirements
@@ -316,6 +321,7 @@ stale_after = "15m"
 Behavior:
 
 - `publish` writes gzipped JSONL shards plus `manifest.json` into `repo_path`
+- current snapshots contain metadata tables only; future file/media blobs must be gzip-compressed in the share repo, with raw-media import kept for backward compatibility
 - `subscribe` writes a git-reader config, disables Slack API and desktop sources for that config, clones the repo, and imports the snapshot
 - pass `--db` to `subscribe` when you want the reader archive to land in a non-default SQLite path
 - `update` pulls and re-imports only when the manifest changes

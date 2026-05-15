@@ -45,6 +45,7 @@ Out of scope for V1:
 - search: FTS5 first, embeddings later
 - source precedence: user-token API, then bot-token API and slack-export imports, then desktop-local cache
 - files: metadata only in DB for V1
+- future file-blob backup must store Git-share media as gzip-compressed files, import those files back into raw local cache layout, and keep legacy raw-media import compatibility
 - desktop-local source: macOS Slack Desktop container path only
 
 ## Local Environment Contract
@@ -321,6 +322,7 @@ Share config:
 4. otherwise clear canonical tables and import the sharded compressed JSONL snapshot
 5. rebuild FTS rows locally
 6. record last import timestamps in `sync_state`
+7. future file/media blobs must be exported as gzip-compressed share files, restored to raw local cache files during import, and keep legacy raw-media import compatibility
 
 ### Desktop-local sync
 
