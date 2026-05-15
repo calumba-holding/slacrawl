@@ -187,7 +187,7 @@ func fetchURL(ctx context.Context, opts FetchOptions, file store.FileRow, url st
 	if opts.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+opts.Token)
 	}
-	resp, err := opts.HTTPClient.Do(req)
+	resp, err := httpClientWithRedirectValidation(opts.HTTPClient, opts.Token != "").Do(req)
 	if err != nil {
 		return fetchResult{}, err
 	}
@@ -243,6 +243,24 @@ func fetchURL(ctx context.Context, opts FetchOptions, file store.FileRow, url st
 		}
 	}
 	return fetchResult{mediaPath: mediaPath, sha256: hash, size: int64(len(body))}, nil
+}
+
+func httpClientWithRedirectValidation(client *http.Client, withToken bool) *http.Client {
+	copy := *client
+	checkRedirect := copy.CheckRedirect
+	copy.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if err := validateFileURL(req.URL.String(), withToken); err != nil {
+			return err
+		}
+		if checkRedirect != nil {
+			return checkRedirect(req, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+	return &copy
 }
 
 func validateFileURL(raw string, withToken bool) error {

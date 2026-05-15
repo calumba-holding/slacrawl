@@ -103,6 +103,58 @@ func TestFetchRequiresTokenForSlackURL(t *testing.T) {
 	require.Equal(t, 1, stats.Failed)
 }
 
+func TestFetchValidatesRedirectTargets(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name     string
+		initial  string
+		redirect string
+		token    string
+	}{
+		{
+			name:     "rejects https downgrade with token",
+			initial:  "https://files.slack.com/file.png",
+			redirect: "http://files.slack.com/file.png",
+			token:    "xoxp-test",
+		},
+		{
+			name:     "rejects non-slack host with token",
+			initial:  "https://files.slack.com/file.png",
+			redirect: "https://files.example/file.png",
+			token:    "xoxp-test",
+		},
+		{
+			name:     "rejects slack host without token",
+			initial:  "https://files.example/file.png",
+			redirect: "https://files.slack.com/file.png",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := seedFileStore(t, tc.initial)
+			defer func() { require.NoError(t, st.Close()) }()
+
+			requests := []string{}
+			stats, err := Fetch(ctx, st, FetchOptions{
+				CacheDir: t.TempDir(),
+				Token:    tc.token,
+				HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					requests = append(requests, r.URL.String())
+					if r.URL.String() == tc.initial {
+						return testHTTPRedirectResponse(r, tc.redirect), nil
+					}
+					return testHTTPResponse(r, []byte("redirected"), int64(len("redirected"))), nil
+				})},
+				StatusUpdate: true,
+			})
+			require.NoError(t, err)
+			require.Equal(t, 1, stats.Failed)
+			require.Equal(t, []string{tc.initial}, requests)
+		})
+	}
+}
+
 func TestLocalAndRepoPathRejectEscapes(t *testing.T) {
 	_, err := LocalPath(t.TempDir(), "../escape")
 	require.Error(t, err)
@@ -149,6 +201,13 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return fn(r)
+}
+
+func testHTTPRedirectResponse(r *http.Request, location string) *http.Response {
+	resp := testHTTPResponse(r, nil, 0)
+	resp.StatusCode = http.StatusFound
+	resp.Header.Set("Location", location)
+	return resp
 }
 
 func testHTTPResponse(r *http.Request, body []byte, contentLength int64) *http.Response {
