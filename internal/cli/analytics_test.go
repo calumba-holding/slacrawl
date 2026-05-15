@@ -14,6 +14,25 @@ import (
 	"github.com/vincentkoc/slacrawl/internal/store"
 )
 
+func TestAnalyticsHelpCommand(t *testing.T) {
+	for _, args := range [][]string{
+		{"analytics", "--help"},
+		{"analytics", "-h"},
+		{"analytics", "help"},
+	} {
+		t.Run(args[1], func(t *testing.T) {
+			stdout := &bytes.Buffer{}
+			app := &App{Stdout: stdout, Stderr: stdout}
+
+			require.NoError(t, app.Run(context.Background(), args))
+			require.Contains(t, stdout.String(), "Usage: slacrawl analytics <subcommand> [flags]")
+			require.Contains(t, stdout.String(), "digest")
+			require.Contains(t, stdout.String(), "quiet")
+			require.Contains(t, stdout.String(), "trends")
+		})
+	}
+}
+
 func TestAnalyticsDigestCommand(t *testing.T) {
 	ctx := context.Background()
 	app, configPath, dbPath, stdout := setupAnalyticsApp(t)

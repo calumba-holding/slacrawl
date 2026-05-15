@@ -10,7 +10,7 @@ import (
 )
 
 func (a *App) runAnalytics(ctx context.Context, configPath string, args []string, format OutputFormat) error {
-	if len(args) == 0 {
+	if len(args) == 0 || analyticsHelpRequested(args) {
 		a.printAnalyticsUsage()
 		return nil
 	}
@@ -27,6 +27,10 @@ func (a *App) runAnalytics(ctx context.Context, configPath string, args []string
 	default:
 		return fmt.Errorf("unknown analytics subcommand: %s; known: digest, quiet, trends", subcommand)
 	}
+}
+
+func analyticsHelpRequested(args []string) bool {
+	return len(args) == 1 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h")
 }
 
 func (a *App) printAnalyticsUsage() {
