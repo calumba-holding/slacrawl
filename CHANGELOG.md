@@ -13,6 +13,7 @@
 - Fixed Slack deleted-message events so live tail marks the original message row deleted instead of inserting a synthetic row at the event timestamp.
 - Handled Slack deleted-message payloads that omit `previous_message`.
 - Read-only SQL now rejects writable CTEs and extra statements before executing queries.
+- Store writes now reject cross-workspace channel, user, and message key collisions instead of overwriting the existing workspace row.
 - `analytics --help`, `analytics -h`, and `analytics help` now print analytics subcommand usage.
 - `analytics quiet` and `analytics trends` now reject unexpected positional arguments instead of ignoring them.
 - Digest reports now exclude messages after the advertised `until` timestamp.

@@ -139,10 +139,11 @@ func TestBuildDigestCountsActiveAuthorsPerWorkspace(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
 	for _, workspaceID := range []string{"T1", "T2"} {
+		userID := "U-" + workspaceID
 		require.NoError(t, st.UpsertWorkspace(ctx, store.Workspace{ID: workspaceID, Name: workspaceID, RawJSON: "{}", UpdatedAt: now}))
 		require.NoError(t, st.UpsertChannel(ctx, store.Channel{ID: "C-" + workspaceID, WorkspaceID: workspaceID, Name: "general", Kind: "public_channel", RawJSON: "{}", UpdatedAt: now}))
-		require.NoError(t, st.UpsertUser(ctx, store.User{ID: "U1", WorkspaceID: workspaceID, Name: "same-id", RawJSON: "{}", UpdatedAt: now}))
-		addMsg(t, ctx, st, "C-"+workspaceID, tsEpoch(now.Add(-time.Hour), 100), workspaceID, "U1", "", "hello")
+		require.NoError(t, st.UpsertUser(ctx, store.User{ID: userID, WorkspaceID: workspaceID, Name: "workspace-user", RawJSON: "{}", UpdatedAt: now}))
+		addMsg(t, ctx, st, "C-"+workspaceID, tsEpoch(now.Add(-time.Hour), 100), workspaceID, userID, "", "hello")
 	}
 
 	d, err := BuildDigest(ctx, st, DigestOptions{Now: now})

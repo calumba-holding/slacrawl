@@ -304,6 +304,73 @@ func TestWorkspaceFiltersApplyToReadQueries(t *testing.T) {
 	require.Equal(t, "T1", channels[0].WorkspaceID)
 }
 
+func TestStoreRejectsCrossWorkspaceKeyCollisions(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := Open(dbPath)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, s.Close()) }()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, s.UpsertChannel(ctx, Channel{ID: "C1", WorkspaceID: "T1", Name: "eng", Kind: "public_channel", RawJSON: "{}", UpdatedAt: now}))
+	err = s.UpsertChannel(ctx, Channel{ID: "C1", WorkspaceID: "T2", Name: "ops", Kind: "public_channel", RawJSON: "{}", UpdatedAt: now})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "channel")
+
+	require.NoError(t, s.UpsertUser(ctx, User{ID: "U1", WorkspaceID: "T1", Name: "alice", RawJSON: "{}", UpdatedAt: now}))
+	err = s.UpsertUser(ctx, User{ID: "U1", WorkspaceID: "T2", Name: "bob", RawJSON: "{}", UpdatedAt: now})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "user")
+
+	require.NoError(t, s.UpsertMessage(ctx, Message{
+		ChannelID:      "CSAME",
+		TS:             "1.0",
+		WorkspaceID:    "T1",
+		Text:           "hello alpha",
+		NormalizedText: "hello alpha",
+		SourceRank:     2,
+		SourceName:     "api-bot",
+		RawJSON:        "{}",
+		UpdatedAt:      now,
+	}, nil))
+	err = s.UpsertMessage(ctx, Message{
+		ChannelID:      "CSAME",
+		TS:             "1.0",
+		WorkspaceID:    "T2",
+		Text:           "hello beta",
+		NormalizedText: "hello beta",
+		SourceRank:     2,
+		SourceName:     "api-bot",
+		RawJSON:        "{}",
+		UpdatedAt:      now,
+	}, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "message")
+
+	err = s.MarkMessageDeleted(ctx, Message{
+		ChannelID:      "CSAME",
+		TS:             "1.0",
+		WorkspaceID:    "T2",
+		Text:           "deleted",
+		NormalizedText: "deleted",
+		DeletedTS:      "1.1",
+		SourceRank:     2,
+		SourceName:     "tail",
+		RawJSON:        "{}",
+		UpdatedAt:      now,
+	}, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "message")
+
+	messages, err := s.Messages(ctx, "T1", "", "", 10)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	require.Equal(t, "hello alpha", messages[0].Text)
+	messages, err = s.Messages(ctx, "T2", "", "", 10)
+	require.NoError(t, err)
+	require.Empty(t, messages)
+}
+
 func TestOpenStampsSchemaVersion(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := Open(dbPath)

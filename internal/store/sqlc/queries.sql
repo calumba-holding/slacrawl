@@ -8,11 +8,10 @@ on conflict(id) do update set
   raw_json=excluded.raw_json,
   updated_at=excluded.updated_at;
 
--- name: UpsertChannel :exec
+-- name: UpsertChannel :execrows
 insert into channels (id, workspace_id, name, kind, topic, purpose, is_private, is_archived, is_shared, is_general, raw_json, updated_at)
 values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 on conflict(id) do update set
-  workspace_id=excluded.workspace_id,
   name=excluded.name,
   kind=excluded.kind,
   topic=excluded.topic,
@@ -22,13 +21,16 @@ on conflict(id) do update set
   is_shared=excluded.is_shared,
   is_general=excluded.is_general,
   raw_json=excluded.raw_json,
-  updated_at=excluded.updated_at;
+  updated_at=excluded.updated_at
+where channels.workspace_id = excluded.workspace_id;
 
--- name: UpsertUser :exec
+-- name: GetChannelWorkspace :one
+select workspace_id from channels where id = ?;
+
+-- name: UpsertUser :execrows
 insert into users (id, workspace_id, name, real_name, display_name, title, is_bot, is_deleted, raw_json, updated_at)
 values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 on conflict(id) do update set
-  workspace_id=excluded.workspace_id,
   name=excluded.name,
   real_name=excluded.real_name,
   display_name=excluded.display_name,
@@ -36,9 +38,13 @@ on conflict(id) do update set
   is_bot=excluded.is_bot,
   is_deleted=excluded.is_deleted,
   raw_json=excluded.raw_json,
-  updated_at=excluded.updated_at;
+  updated_at=excluded.updated_at
+where users.workspace_id = excluded.workspace_id;
 
--- name: UpsertMessage :exec
+-- name: GetUserWorkspace :one
+select workspace_id from users where id = ?;
+
+-- name: UpsertMessage :execrows
 insert into messages (
   channel_id, ts, workspace_id, user_id, subtype, client_msg_id, thread_ts, parent_user_id,
   text, normalized_text, reply_count, latest_reply, edited_ts, deleted_ts, source_rank,
@@ -69,7 +75,11 @@ on conflict(channel_id, ts) do update set
     when excluded.source_rank <= messages.source_rank then excluded.raw_json
     else messages.raw_json
   end,
-  updated_at=excluded.updated_at;
+  updated_at=excluded.updated_at
+where messages.workspace_id = excluded.workspace_id;
+
+-- name: GetMessageWorkspace :one
+select workspace_id from messages where channel_id = ? and ts = ?;
 
 -- name: DeleteMessageMentions :exec
 delete from message_mentions where channel_id = ? and ts = ?;
@@ -160,7 +170,8 @@ set deleted_ts = ?,
       when trim(normalized_text) = '' then '[deleted]'
       else trim(normalized_text || ' [deleted]')
     end
-where channel_id = ? and ts = ?;
+where channel_id = ? and ts = ?
+  and workspace_id = ?;
 
 -- name: GetMessageSearchText :one
 select normalized_text

@@ -195,6 +195,17 @@ func (q *Queries) DeleteSyncStateByTypePrefix(ctx context.Context, arg DeleteSyn
 	return err
 }
 
+const getChannelWorkspace = `-- name: GetChannelWorkspace :one
+select workspace_id from channels where id = ?
+`
+
+func (q *Queries) GetChannelWorkspace(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getChannelWorkspace, id)
+	var workspace_id string
+	err := row.Scan(&workspace_id)
+	return workspace_id, err
+}
+
 const getMessageSearchText = `-- name: GetMessageSearchText :one
 select normalized_text
 from messages
@@ -213,6 +224,22 @@ func (q *Queries) GetMessageSearchText(ctx context.Context, arg GetMessageSearch
 	return normalized_text, err
 }
 
+const getMessageWorkspace = `-- name: GetMessageWorkspace :one
+select workspace_id from messages where channel_id = ? and ts = ?
+`
+
+type GetMessageWorkspaceParams struct {
+	ChannelID string `json:"channel_id"`
+	Ts        string `json:"ts"`
+}
+
+func (q *Queries) GetMessageWorkspace(ctx context.Context, arg GetMessageWorkspaceParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, getMessageWorkspace, arg.ChannelID, arg.Ts)
+	var workspace_id string
+	err := row.Scan(&workspace_id)
+	return workspace_id, err
+}
+
 const getSyncState = `-- name: GetSyncState :one
 select value from sync_state
 where source_name = ? and entity_type = ? and entity_id = ?
@@ -229,6 +256,17 @@ func (q *Queries) GetSyncState(ctx context.Context, arg GetSyncStateParams) (str
 	var value string
 	err := row.Scan(&value)
 	return value, err
+}
+
+const getUserWorkspace = `-- name: GetUserWorkspace :one
+select workspace_id from users where id = ?
+`
+
+func (q *Queries) GetUserWorkspace(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getUserWorkspace, id)
+	var workspace_id string
+	err := row.Scan(&workspace_id)
+	return workspace_id, err
 }
 
 const insertMessageEvent = `-- name: InsertMessageEvent :exec
@@ -1127,13 +1165,15 @@ set deleted_ts = ?,
       else trim(normalized_text || ' [deleted]')
     end
 where channel_id = ? and ts = ?
+  and workspace_id = ?
 `
 
 type MarkMessageDeletedParams struct {
-	DeletedTs sql.NullString `json:"deleted_ts"`
-	UpdatedAt string         `json:"updated_at"`
-	ChannelID string         `json:"channel_id"`
-	Ts        string         `json:"ts"`
+	DeletedTs   sql.NullString `json:"deleted_ts"`
+	UpdatedAt   string         `json:"updated_at"`
+	ChannelID   string         `json:"channel_id"`
+	Ts          string         `json:"ts"`
+	WorkspaceID string         `json:"workspace_id"`
 }
 
 func (q *Queries) MarkMessageDeleted(ctx context.Context, arg MarkMessageDeletedParams) (int64, error) {
@@ -1142,6 +1182,7 @@ func (q *Queries) MarkMessageDeleted(ctx context.Context, arg MarkMessageDeleted
 		arg.UpdatedAt,
 		arg.ChannelID,
 		arg.Ts,
+		arg.WorkspaceID,
 	)
 	if err != nil {
 		return 0, err
@@ -1294,11 +1335,10 @@ func (q *Queries) UpdateFileMedia(ctx context.Context, arg UpdateFileMediaParams
 	return err
 }
 
-const upsertChannel = `-- name: UpsertChannel :exec
+const upsertChannel = `-- name: UpsertChannel :execrows
 insert into channels (id, workspace_id, name, kind, topic, purpose, is_private, is_archived, is_shared, is_general, raw_json, updated_at)
 values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 on conflict(id) do update set
-  workspace_id=excluded.workspace_id,
   name=excluded.name,
   kind=excluded.kind,
   topic=excluded.topic,
@@ -1309,6 +1349,7 @@ on conflict(id) do update set
   is_general=excluded.is_general,
   raw_json=excluded.raw_json,
   updated_at=excluded.updated_at
+where channels.workspace_id = excluded.workspace_id
 `
 
 type UpsertChannelParams struct {
@@ -1326,8 +1367,8 @@ type UpsertChannelParams struct {
 	UpdatedAt   string         `json:"updated_at"`
 }
 
-func (q *Queries) UpsertChannel(ctx context.Context, arg UpsertChannelParams) error {
-	_, err := q.db.ExecContext(ctx, upsertChannel,
+func (q *Queries) UpsertChannel(ctx context.Context, arg UpsertChannelParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, upsertChannel,
 		arg.ID,
 		arg.WorkspaceID,
 		arg.Name,
@@ -1341,10 +1382,13 @@ func (q *Queries) UpsertChannel(ctx context.Context, arg UpsertChannelParams) er
 		arg.RawJson,
 		arg.UpdatedAt,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
-const upsertMessage = `-- name: UpsertMessage :exec
+const upsertMessage = `-- name: UpsertMessage :execrows
 insert into messages (
   channel_id, ts, workspace_id, user_id, subtype, client_msg_id, thread_ts, parent_user_id,
   text, normalized_text, reply_count, latest_reply, edited_ts, deleted_ts, source_rank,
@@ -1376,6 +1420,7 @@ on conflict(channel_id, ts) do update set
     else messages.raw_json
   end,
   updated_at=excluded.updated_at
+where messages.workspace_id = excluded.workspace_id
 `
 
 type UpsertMessageParams struct {
@@ -1399,8 +1444,8 @@ type UpsertMessageParams struct {
 	UpdatedAt      string         `json:"updated_at"`
 }
 
-func (q *Queries) UpsertMessage(ctx context.Context, arg UpsertMessageParams) error {
-	_, err := q.db.ExecContext(ctx, upsertMessage,
+func (q *Queries) UpsertMessage(ctx context.Context, arg UpsertMessageParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, upsertMessage,
 		arg.ChannelID,
 		arg.Ts,
 		arg.WorkspaceID,
@@ -1420,7 +1465,10 @@ func (q *Queries) UpsertMessage(ctx context.Context, arg UpsertMessageParams) er
 		arg.RawJson,
 		arg.UpdatedAt,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const upsertMessageMention = `-- name: UpsertMessageMention :exec
@@ -1449,11 +1497,10 @@ func (q *Queries) UpsertMessageMention(ctx context.Context, arg UpsertMessageMen
 	return err
 }
 
-const upsertUser = `-- name: UpsertUser :exec
+const upsertUser = `-- name: UpsertUser :execrows
 insert into users (id, workspace_id, name, real_name, display_name, title, is_bot, is_deleted, raw_json, updated_at)
 values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 on conflict(id) do update set
-  workspace_id=excluded.workspace_id,
   name=excluded.name,
   real_name=excluded.real_name,
   display_name=excluded.display_name,
@@ -1462,6 +1509,7 @@ on conflict(id) do update set
   is_deleted=excluded.is_deleted,
   raw_json=excluded.raw_json,
   updated_at=excluded.updated_at
+where users.workspace_id = excluded.workspace_id
 `
 
 type UpsertUserParams struct {
@@ -1477,8 +1525,8 @@ type UpsertUserParams struct {
 	UpdatedAt   string         `json:"updated_at"`
 }
 
-func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) error {
-	_, err := q.db.ExecContext(ctx, upsertUser,
+func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, upsertUser,
 		arg.ID,
 		arg.WorkspaceID,
 		arg.Name,
@@ -1490,7 +1538,10 @@ func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) error {
 		arg.RawJson,
 		arg.UpdatedAt,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const upsertWorkspace = `-- name: UpsertWorkspace :exec

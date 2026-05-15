@@ -430,7 +430,7 @@ func (s *Store) UpsertWorkspace(ctx context.Context, workspace Workspace) error 
 }
 
 func (s *Store) UpsertChannel(ctx context.Context, channel Channel) error {
-	return s.q.UpsertChannel(ctx, storedb.UpsertChannelParams{
+	rows, err := s.q.UpsertChannel(ctx, storedb.UpsertChannelParams{
 		ID:          channel.ID,
 		WorkspaceID: channel.WorkspaceID,
 		Name:        channel.Name,
@@ -444,10 +444,20 @@ func (s *Store) UpsertChannel(ctx context.Context, channel Channel) error {
 		RawJson:     channel.RawJSON,
 		UpdatedAt:   formatDBTime(channel.UpdatedAt),
 	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		if err := rejectWorkspaceCollision(ctx, channel.WorkspaceID, "channel", channel.ID, s.q.GetChannelWorkspace); err != nil {
+			return err
+		}
+		return fmt.Errorf("channel %q upsert affected no rows", channel.ID)
+	}
+	return nil
 }
 
 func (s *Store) UpsertUser(ctx context.Context, user User) error {
-	return s.q.UpsertUser(ctx, storedb.UpsertUserParams{
+	rows, err := s.q.UpsertUser(ctx, storedb.UpsertUserParams{
 		ID:          user.ID,
 		WorkspaceID: user.WorkspaceID,
 		Name:        user.Name,
@@ -459,6 +469,16 @@ func (s *Store) UpsertUser(ctx context.Context, user User) error {
 		RawJson:     user.RawJSON,
 		UpdatedAt:   formatDBTime(user.UpdatedAt),
 	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		if err := rejectWorkspaceCollision(ctx, user.WorkspaceID, "user", user.ID, s.q.GetUserWorkspace); err != nil {
+			return err
+		}
+		return fmt.Errorf("user %q upsert affected no rows", user.ID)
+	}
+	return nil
 }
 
 func (s *Store) UpsertMessage(ctx context.Context, message Message, mentions []Mention) error {
@@ -470,7 +490,7 @@ func (s *Store) UpsertMessage(ctx context.Context, message Message, mentions []M
 	defer func() { _ = tx.Rollback() }()
 	qtx := s.q.WithTx(tx)
 
-	if err := qtx.UpsertMessage(ctx, storedb.UpsertMessageParams{
+	rows, err := qtx.UpsertMessage(ctx, storedb.UpsertMessageParams{
 		ChannelID:      message.ChannelID,
 		Ts:             message.TS,
 		WorkspaceID:    message.WorkspaceID,
@@ -489,8 +509,15 @@ func (s *Store) UpsertMessage(ctx context.Context, message Message, mentions []M
 		SourceName:     message.SourceName,
 		RawJson:        message.RawJSON,
 		UpdatedAt:      formatDBTime(message.UpdatedAt),
-	}); err != nil {
+	})
+	if err != nil {
 		return err
+	}
+	if rows == 0 {
+		if err := rejectMessageWorkspaceCollision(ctx, qtx, message); err != nil {
+			return err
+		}
+		return fmt.Errorf("message %q upsert affected no rows", key)
 	}
 
 	if err := replaceMessageMentions(ctx, qtx, message.ChannelID, message.TS, mentions); err != nil {
@@ -577,17 +604,18 @@ func (s *Store) MarkMessageDeleted(ctx context.Context, message Message, mention
 
 	updatedAt := formatDBTime(message.UpdatedAt)
 	rows, err := qtx.MarkMessageDeleted(ctx, storedb.MarkMessageDeletedParams{
-		DeletedTs: dbText(message.DeletedTS),
-		UpdatedAt: updatedAt,
-		ChannelID: message.ChannelID,
-		Ts:        message.TS,
+		DeletedTs:   dbText(message.DeletedTS),
+		UpdatedAt:   updatedAt,
+		ChannelID:   message.ChannelID,
+		Ts:          message.TS,
+		WorkspaceID: message.WorkspaceID,
 	})
 	if err != nil {
 		return err
 	}
 	switch rows {
 	case 0:
-		if err := qtx.UpsertMessage(ctx, storedb.UpsertMessageParams{
+		rows, err := qtx.UpsertMessage(ctx, storedb.UpsertMessageParams{
 			ChannelID:      message.ChannelID,
 			Ts:             message.TS,
 			WorkspaceID:    message.WorkspaceID,
@@ -606,8 +634,15 @@ func (s *Store) MarkMessageDeleted(ctx context.Context, message Message, mention
 			SourceName:     message.SourceName,
 			RawJson:        message.RawJSON,
 			UpdatedAt:      updatedAt,
-		}); err != nil {
+		})
+		if err != nil {
 			return err
+		}
+		if rows == 0 {
+			if err := rejectMessageWorkspaceCollision(ctx, qtx, message); err != nil {
+				return err
+			}
+			return fmt.Errorf("message %q upsert affected no rows", key)
 		}
 		if err := qtx.DeleteMessageFTS(ctx, key); err != nil {
 			return err
@@ -648,6 +683,34 @@ func (s *Store) MarkMessageDeleted(ctx context.Context, message Message, mention
 		return err
 	}
 	return tx.Commit()
+}
+
+func rejectMessageWorkspaceCollision(ctx context.Context, q *storedb.Queries, message Message) error {
+	existing, err := q.GetMessageWorkspace(ctx, storedb.GetMessageWorkspaceParams{ChannelID: message.ChannelID, Ts: message.TS})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if existing != message.WorkspaceID {
+		return fmt.Errorf("message %q already belongs to workspace %q, not %q", messageKey(message.ChannelID, message.TS), existing, message.WorkspaceID)
+	}
+	return nil
+}
+
+func rejectWorkspaceCollision(ctx context.Context, workspaceID, entity, id string, lookup func(context.Context, string) (string, error)) error {
+	existing, err := lookup(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if existing != workspaceID {
+		return fmt.Errorf("%s %q already belongs to workspace %q, not %q", entity, id, existing, workspaceID)
+	}
+	return nil
 }
 
 func replaceMessageMentions(ctx context.Context, qtx *storedb.Queries, channelID, ts string, mentions []Mention) error {
