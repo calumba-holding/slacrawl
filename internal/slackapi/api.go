@@ -309,7 +309,7 @@ func (c *Client) HandleEventsAPIEvent(ctx context.Context, st *store.Store, work
 		msg := messageFromEvent(ev)
 		stored := toStoreMessage(workspaceID, msg, SourceBot, 2, now)
 		if msg.SubType == "message_deleted" || msg.DeletedTimestamp != "" {
-			return st.MarkMessageDeleted(ctx, stored)
+			return st.MarkMessageDeleted(ctx, stored, toStoreMentions(msg))
 		}
 		return st.UpsertMessage(ctx, stored, toStoreMentions(msg))
 	case *slackevents.ChannelRenameEvent:

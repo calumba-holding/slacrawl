@@ -921,6 +921,37 @@ func TestHandleEventsAPIEventMarksOriginalMessageDeleted(t *testing.T) {
 	require.Len(t, matches, 1)
 }
 
+func TestHandleEventsAPIEventIndexesMentionsForDeletedTombstone(t *testing.T) {
+	st := mustStore(t)
+	defer func() { require.NoError(t, st.Close()) }()
+	client := New(config.Tokens{Bot: "xoxb-test"})
+	client.now = func() time.Time { return time.Date(2026, 3, 8, 1, 2, 3, 0, time.UTC) }
+	ctx := context.Background()
+	raw := []byte(`{
+	  "token":"ignored",
+	  "team_id":"T123",
+	  "api_app_id":"A123",
+	  "type":"event_callback",
+	  "event":{
+	    "type":"message",
+	    "subtype":"message_deleted",
+	    "channel":"C123",
+	    "deleted_ts":"1710000000.000100",
+	    "previous_message":{"text":"gone <@U234|sam>","ts":"1710000000.000100","user":"U123"},
+	    "event_ts":"1710000002.000200"
+	  }
+	}`)
+	event, err := slackevents.ParseEvent(raw, slackevents.OptionNoVerifyToken())
+	require.NoError(t, err)
+	require.NoError(t, client.HandleEventsAPIEvent(ctx, st, "T123", event))
+
+	mentions, err := st.Mentions(ctx, "T123", "U234", 10)
+	require.NoError(t, err)
+	require.Len(t, mentions, 1)
+	require.Equal(t, "1710000000.000100", mentions[0].TS)
+	require.Equal(t, "sam", mentions[0].DisplayText)
+}
+
 func TestHandleEventsAPIEventIgnoresUnknown(t *testing.T) {
 	st := mustStore(t)
 	defer func() { require.NoError(t, st.Close()) }()

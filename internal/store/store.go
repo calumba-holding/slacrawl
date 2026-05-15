@@ -493,25 +493,8 @@ func (s *Store) UpsertMessage(ctx context.Context, message Message, mentions []M
 		return err
 	}
 
-	if err := qtx.DeleteMessageMentions(ctx, storedb.DeleteMessageMentionsParams{ChannelID: message.ChannelID, Ts: message.TS}); err != nil {
+	if err := replaceMessageMentions(ctx, qtx, message.ChannelID, message.TS, mentions); err != nil {
 		return err
-	}
-	seenMentions := map[string]struct{}{}
-	for _, mention := range mentions {
-		key := mention.Type + "|" + mention.TargetID + "|" + mention.DisplayText
-		if _, ok := seenMentions[key]; ok {
-			continue
-		}
-		seenMentions[key] = struct{}{}
-		if err := qtx.UpsertMessageMention(ctx, storedb.UpsertMessageMentionParams{
-			ChannelID:   message.ChannelID,
-			Ts:          message.TS,
-			MentionType: mention.Type,
-			TargetID:    mention.TargetID,
-			DisplayText: dbText(mention.DisplayText),
-		}); err != nil {
-			return err
-		}
 	}
 
 	filesForSearch := message.Files
@@ -583,7 +566,7 @@ func (s *Store) UpsertMessage(ctx context.Context, message Message, mentions []M
 	return tx.Commit()
 }
 
-func (s *Store) MarkMessageDeleted(ctx context.Context, message Message) error {
+func (s *Store) MarkMessageDeleted(ctx context.Context, message Message, mentions []Mention) error {
 	key := messageKey(message.ChannelID, message.TS)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -632,6 +615,9 @@ func (s *Store) MarkMessageDeleted(ctx context.Context, message Message) error {
 		if err := qtx.InsertMessageFTS(ctx, storedb.InsertMessageFTSParams{MessageKey: key, Content: messageSearchContent(message)}); err != nil {
 			return err
 		}
+		if err := replaceMessageMentions(ctx, qtx, message.ChannelID, message.TS, mentions); err != nil {
+			return err
+		}
 	default:
 		normalizedText, err := qtx.GetMessageSearchText(ctx, storedb.GetMessageSearchTextParams{ChannelID: message.ChannelID, Ts: message.TS})
 		if err != nil {
@@ -662,6 +648,30 @@ func (s *Store) MarkMessageDeleted(ctx context.Context, message Message) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+func replaceMessageMentions(ctx context.Context, qtx *storedb.Queries, channelID, ts string, mentions []Mention) error {
+	if err := qtx.DeleteMessageMentions(ctx, storedb.DeleteMessageMentionsParams{ChannelID: channelID, Ts: ts}); err != nil {
+		return err
+	}
+	seenMentions := map[string]struct{}{}
+	for _, mention := range mentions {
+		key := mention.Type + "|" + mention.TargetID + "|" + mention.DisplayText
+		if _, ok := seenMentions[key]; ok {
+			continue
+		}
+		seenMentions[key] = struct{}{}
+		if err := qtx.UpsertMessageMention(ctx, storedb.UpsertMessageMentionParams{
+			ChannelID:   channelID,
+			Ts:          ts,
+			MentionType: mention.Type,
+			TargetID:    mention.TargetID,
+			DisplayText: dbText(mention.DisplayText),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func existingFileMedia(ctx context.Context, qtx *storedb.Queries, channelID, ts string) (map[string]MessageFile, error) {
