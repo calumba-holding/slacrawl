@@ -1,7 +1,7 @@
 BINARY ?= bin/slacrawl
 COMPLETION_DIR ?= dist/completions
 
-.PHONY: build test fmt run completion completion-bash completion-zsh clean
+.PHONY: build test fmt run generate-sqlc completion completion-bash completion-zsh clean
 
 build:
 	mkdir -p $(dir $(BINARY))
@@ -15,6 +15,9 @@ fmt:
 
 run:
 	go run ./cmd/slacrawl $(ARGS)
+
+generate-sqlc:
+	go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
 
 completion: completion-bash completion-zsh
 

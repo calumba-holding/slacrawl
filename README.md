@@ -232,6 +232,7 @@ Color is disabled automatically when stdout is not a TTY. You can also force pla
 make build
 make test
 make run ARGS="status"
+make generate-sqlc
 make completion
 ```
 
