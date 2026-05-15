@@ -829,6 +829,28 @@ func TestMessageFromEventPreservesDeleteAndThreadFields(t *testing.T) {
 	require.Equal(t, "1710000000.000100", msg.Timestamp)
 	require.Equal(t, "1710000000.000100", msg.DeletedTimestamp)
 	require.Equal(t, "1710000000.000100", msg.ThreadTimestamp)
+
+	raw = []byte(`{
+	  "token":"ignored",
+	  "team_id":"T123",
+	  "api_app_id":"A123",
+	  "type":"event_callback",
+	  "event":{
+	    "type":"message",
+	    "subtype":"message_deleted",
+	    "channel":"C123",
+	    "ts":"1710000002.000200",
+	    "deleted_ts":"1710000000.000100",
+	    "event_ts":"1710000002.000200"
+	  }
+	}`)
+	event, err = slackevents.ParseEvent(raw, slackevents.OptionNoVerifyToken())
+	require.NoError(t, err)
+	ev, ok = event.InnerEvent.Data.(*slackevents.MessageEvent)
+	require.True(t, ok)
+	msg = messageFromEvent(ev)
+	require.Equal(t, "1710000000.000100", msg.Timestamp)
+	require.Equal(t, "1710000000.000100", msg.DeletedTimestamp)
 }
 
 func TestHandleEventsAPIEventMarksOriginalMessageDeleted(t *testing.T) {

@@ -511,6 +511,9 @@ func messageFromEvent(event *slackevents.MessageEvent) slack.Message {
 	if msg.Timestamp == "" {
 		msg.Timestamp = event.TimeStamp
 	}
+	if event.SubType == "message_deleted" && event.DeletedTimeStamp != "" {
+		msg.Timestamp = event.DeletedTimeStamp
+	}
 	if msg.ThreadTimestamp == "" {
 		msg.ThreadTimestamp = event.ThreadTimeStamp
 	}
