@@ -417,3 +417,170 @@ order by name asc`)
 	require.NoError(t, err)
 	require.Len(t, rows, 6)
 }
+
+func TestOpenMigratesVersion2Schema(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = db.Exec(legacyStoreSchemaV2)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	s, err := Open(dbPath)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, s.Close()) }()
+
+	var version int
+	require.NoError(t, s.DB().QueryRow("pragma user_version").Scan(&version))
+	require.Equal(t, schemaVersion, version)
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, s.UpsertMessage(ctx, Message{
+		ChannelID:      "C1",
+		TS:             "123.45",
+		WorkspaceID:    "T1",
+		Text:           "file share",
+		NormalizedText: "file share",
+		SourceRank:     2,
+		SourceName:     "api-bot",
+		RawJSON:        "{}",
+		UpdatedAt:      now,
+		Files: []MessageFile{{
+			FileID:    "F1",
+			Name:      "legacy.txt",
+			PlainText: "migrated appendix",
+			RawJSON:   "{}",
+		}},
+	}, nil))
+	matches, err := s.Search(ctx, "", "appendix", 10)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+}
+
+func TestOpenDoesNotStampInvalidOldSchema(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = db.Exec(`
+create table messages (
+  channel_id text not null,
+  ts text not null,
+  workspace_id text not null,
+  primary key (channel_id, ts)
+);
+pragma user_version = 2;
+`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	_, err = Open(dbPath)
+	require.Error(t, err)
+
+	db, err = sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, db.Close()) }()
+	var version int
+	require.NoError(t, db.QueryRow("pragma user_version").Scan(&version))
+	require.Equal(t, 2, version)
+}
+
+const legacyStoreSchemaV2 = `
+create table workspaces (
+  id text primary key,
+  name text not null,
+  domain text,
+  enterprise_id text,
+  raw_json text not null,
+  updated_at text not null
+);
+
+create table channels (
+  id text primary key,
+  workspace_id text not null,
+  name text not null,
+  kind text not null,
+  topic text,
+  purpose text,
+  is_private integer not null default 0,
+  is_archived integer not null default 0,
+  is_shared integer not null default 0,
+  is_general integer not null default 0,
+  raw_json text not null,
+  updated_at text not null
+);
+
+create table users (
+  id text primary key,
+  workspace_id text not null,
+  name text not null,
+  real_name text,
+  display_name text,
+  title text,
+  is_bot integer not null default 0,
+  is_deleted integer not null default 0,
+  raw_json text not null,
+  updated_at text not null
+);
+
+create table messages (
+  channel_id text not null,
+  ts text not null,
+  workspace_id text not null,
+  user_id text,
+  subtype text,
+  client_msg_id text,
+  thread_ts text,
+  parent_user_id text,
+  text text not null,
+  normalized_text text not null,
+  reply_count integer not null default 0,
+  latest_reply text,
+  edited_ts text,
+  deleted_ts text,
+  source_rank integer not null,
+  source_name text not null,
+  raw_json text not null,
+  updated_at text not null,
+  primary key (channel_id, ts)
+);
+
+create table message_events (
+  id integer primary key autoincrement,
+  channel_id text not null,
+  ts text not null,
+  event_type text not null,
+  source_name text not null,
+  payload_json text not null,
+  created_at text not null
+);
+
+create table sync_state (
+  source_name text not null,
+  entity_type text not null,
+  entity_id text not null,
+  value text not null,
+  updated_at text not null,
+  primary key (source_name, entity_type, entity_id)
+);
+
+create table message_mentions (
+  channel_id text not null,
+  ts text not null,
+  mention_type text not null,
+  target_id text not null,
+  display_text text,
+  primary key (channel_id, ts, mention_type, target_id)
+);
+
+create table embedding_jobs (
+  id integer primary key autoincrement,
+  channel_id text not null,
+  ts text not null,
+  state text not null,
+  created_at text not null
+);
+
+create virtual table message_fts using fts5(message_key unindexed, content);
+pragma user_version = 2;
+`

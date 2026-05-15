@@ -18,6 +18,12 @@ import (
 
 const schemaVersion = 3
 
+const schemaPragmas = `
+pragma foreign_keys = on;
+pragma journal_mode = wal;
+pragma busy_timeout = 5000;
+`
+
 const schema = `
 pragma foreign_keys = on;
 pragma journal_mode = wal;
@@ -161,6 +167,50 @@ create table if not exists embedding_jobs (
 
 create virtual table if not exists message_fts using fts5(message_key unindexed, content);
 create index if not exists idx_sync_state_updated on sync_state(updated_at desc);
+`
+
+const schemaV2Migration = `
+create index if not exists idx_messages_workspace_ts on messages(workspace_id, ts desc);
+create index if not exists idx_messages_workspace_channel_ts on messages(workspace_id, channel_id, ts desc);
+create index if not exists idx_messages_workspace_user_ts on messages(workspace_id, user_id, ts desc);
+create index if not exists idx_messages_key_expr on messages((channel_id || '|' || ts));
+create index if not exists idx_message_mentions_target_ts on message_mentions(target_id, ts desc);
+create index if not exists idx_sync_state_updated on sync_state(updated_at desc);
+`
+
+const schemaV3Migration = `
+create table if not exists message_files (
+  workspace_id text not null,
+  channel_id text not null,
+  ts text not null,
+  file_id text not null,
+  user_id text,
+  name text not null default '',
+  title text not null default '',
+  mimetype text,
+  filetype text,
+  pretty_type text,
+  mode text,
+  size integer not null default 0,
+  url_private text,
+  url_private_download text,
+  permalink text,
+  is_public integer not null default 0,
+  plain_text text not null default '',
+  preview_plain_text text not null default '',
+  media_path text,
+  content_sha256 text,
+  content_size integer not null default 0,
+  fetched_at text,
+  fetch_status text not null default '',
+  fetch_error text not null default '',
+  raw_json text not null,
+  updated_at text not null,
+  primary key (channel_id, ts, file_id)
+);
+create index if not exists idx_message_files_workspace_ts on message_files(workspace_id, ts desc);
+create index if not exists idx_message_files_file_id on message_files(file_id);
+create index if not exists idx_message_files_name on message_files(name);
 `
 
 type Store struct {
@@ -382,6 +432,10 @@ func Open(path string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
+	if _, err := db.Exec(schemaPragmas); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	currentVersion, err := readSchemaVersion(db)
 	if err != nil {
 		_ = db.Close()
@@ -391,12 +445,32 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("database schema version %d is newer than this slacrawl build supports (%d)", currentVersion, schemaVersion)
 	}
-	if _, err := db.Exec(schema); err != nil {
-		_ = db.Close()
-		return nil, err
+	if currentVersion == 0 {
+		empty, err := storeSchemaEmpty(db)
+		if err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		if !empty {
+			currentVersion = 1
+		}
 	}
-	if currentVersion != schemaVersion {
+	if currentVersion == 0 {
+		if _, err := db.Exec(schema); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
 		if err := writeSchemaVersion(db, schemaVersion); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	} else if currentVersion < schemaVersion {
+		if err := migrateSchema(db, currentVersion); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	} else {
+		if _, err := db.Exec(schema); err != nil {
 			_ = db.Close()
 			return nil, err
 		}
@@ -1588,8 +1662,121 @@ func readSchemaVersion(db *sql.DB) (int, error) {
 	return version, nil
 }
 
+func storeSchemaEmpty(db *sql.DB) (bool, error) {
+	var count int
+	err := db.QueryRow(`
+select count(*)
+from sqlite_master
+where type in ('table', 'view')
+  and name in ('workspaces', 'channels', 'users', 'messages', 'sync_state', 'message_fts')
+`).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("inspect sqlite schema: %w", err)
+	}
+	return count == 0, nil
+}
+
+func migrateSchema(db *sql.DB, currentVersion int) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if currentVersion < 2 {
+		if _, err := tx.Exec(schemaV2Migration); err != nil {
+			return fmt.Errorf("migrate sqlite schema to v2: %w", err)
+		}
+		currentVersion = 2
+	}
+	if currentVersion < 3 {
+		if _, err := tx.Exec(schemaV3Migration); err != nil {
+			return fmt.Errorf("migrate sqlite schema to v3: %w", err)
+		}
+		currentVersion = 3
+	}
+	if currentVersion != schemaVersion {
+		return fmt.Errorf("no migration path from sqlite schema version %d to %d", currentVersion, schemaVersion)
+	}
+	if err := validateCurrentSchema(tx); err != nil {
+		return err
+	}
+	if err := writeSchemaVersionTx(tx, schemaVersion); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit sqlite schema migration: %w", err)
+	}
+	return nil
+}
+
+type schemaQueryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func validateCurrentSchema(q schemaQueryer) error {
+	required := map[string][]string{
+		"workspaces":       {"id", "name", "domain", "enterprise_id", "raw_json", "updated_at"},
+		"channels":         {"id", "workspace_id", "name", "kind", "topic", "purpose", "is_private", "is_archived", "is_shared", "is_general", "raw_json", "updated_at"},
+		"users":            {"id", "workspace_id", "name", "real_name", "display_name", "title", "is_bot", "is_deleted", "raw_json", "updated_at"},
+		"messages":         {"channel_id", "ts", "workspace_id", "user_id", "subtype", "client_msg_id", "thread_ts", "parent_user_id", "text", "normalized_text", "reply_count", "latest_reply", "edited_ts", "deleted_ts", "source_rank", "source_name", "raw_json", "updated_at"},
+		"message_files":    {"workspace_id", "channel_id", "ts", "file_id", "user_id", "name", "title", "mimetype", "filetype", "pretty_type", "mode", "size", "url_private", "url_private_download", "permalink", "is_public", "plain_text", "preview_plain_text", "media_path", "content_sha256", "content_size", "fetched_at", "fetch_status", "fetch_error", "raw_json", "updated_at"},
+		"message_events":   {"id", "channel_id", "ts", "event_type", "source_name", "payload_json", "created_at"},
+		"sync_state":       {"source_name", "entity_type", "entity_id", "value", "updated_at"},
+		"message_mentions": {"channel_id", "ts", "mention_type", "target_id", "display_text"},
+		"embedding_jobs":   {"id", "channel_id", "ts", "state", "created_at"},
+		"message_fts":      {"message_key", "content"},
+	}
+	for table, columns := range required {
+		if err := requireSchemaColumns(q, table, columns); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func requireSchemaColumns(q schemaQueryer, table string, required []string) error {
+	rows, err := q.QueryContext(context.Background(), fmt.Sprintf("pragma table_info(%s)", table))
+	if err != nil {
+		return fmt.Errorf("inspect sqlite table %s: %w", table, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return fmt.Errorf("inspect sqlite table %s: %w", table, err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspect sqlite table %s: %w", table, err)
+	}
+	if len(columns) == 0 {
+		return fmt.Errorf("sqlite schema missing table %s", table)
+	}
+	for _, column := range required {
+		if !columns[column] {
+			return fmt.Errorf("sqlite schema table %s missing column %s", table, column)
+		}
+	}
+	return nil
+}
+
 func writeSchemaVersion(db *sql.DB, version int) error {
 	if _, err := db.Exec(fmt.Sprintf("pragma user_version = %d", version)); err != nil {
+		return fmt.Errorf("write sqlite schema version: %w", err)
+	}
+	return nil
+}
+
+func writeSchemaVersionTx(tx *sql.Tx, version int) error {
+	if _, err := tx.Exec(fmt.Sprintf("pragma user_version = %d", version)); err != nil {
 		return fmt.Errorf("write sqlite schema version: %w", err)
 	}
 	return nil
