@@ -2,10 +2,13 @@ package slackapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,6 +57,8 @@ type Client struct {
 	user         *slack.Client
 	tokens       config.Tokens
 	appToken     string
+	apiURL       string
+	httpClient   *http.Client
 	includeDMs   bool
 	sleep        func(context.Context, time.Duration) error
 	now          func() time.Time
@@ -68,9 +73,17 @@ func NewWithOptions(tokens config.Tokens, apiURL string, httpClient *http.Client
 	client := &Client{
 		tokens:     tokens,
 		appToken:   tokens.App,
+		apiURL:     slack.APIURL,
+		httpClient: http.DefaultClient,
 		includeDMs: tokens.User != "",
 		sleep:      sleepContext,
 		now:        func() time.Time { return time.Now().UTC() },
+	}
+	if apiURL != "" {
+		client.apiURL = apiURL
+	}
+	if httpClient != nil {
+		client.httpClient = httpClient
 	}
 
 	buildOptions := func(includeAppToken bool) []slack.Option {
@@ -221,6 +234,7 @@ func (c *Client) Sync(ctx context.Context, st *store.Store, opts SyncOptions) er
 			}
 			if err := c.syncChannelsWithSource(ctx, st, workspaceID, selectedDMs, opts, now, userRepliesAvailable, channelSyncSource{
 				historyClient:    c.user,
+				token:            c.tokens.User,
 				sourceName:       SourceUser,
 				sourceRank:       1,
 				allowJoin:        false,
@@ -307,7 +321,7 @@ func (c *Client) HandleEventsAPIEvent(ctx context.Context, st *store.Store, work
 	switch ev := event.InnerEvent.Data.(type) {
 	case *slackevents.MessageEvent:
 		msg := messageFromEvent(ev)
-		stored := toStoreMessage(workspaceID, msg, SourceBot, 2, now)
+		stored := toStoreMessage(workspaceID, msg, SourceBot, 2, rawMessagePayload(event), now)
 		if msg.SubType == "message_deleted" || msg.DeletedTimestamp != "" {
 			return st.MarkMessageDeleted(ctx, stored, toStoreMentions(msg))
 		}
@@ -321,6 +335,32 @@ func (c *Client) HandleEventsAPIEvent(ctx context.Context, st *store.Store, work
 	default:
 		return nil
 	}
+}
+
+func rawMessagePayload(event slackevents.EventsAPIEvent) any {
+	callback, ok := event.Data.(*slackevents.EventsAPICallbackEvent)
+	if !ok || callback.InnerEvent == nil {
+		return nil
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(*callback.InnerEvent, &raw); err != nil {
+		return nil
+	}
+	return rawMessageFieldsPayload(raw)
+}
+
+func rawMessageFieldsPayload(raw map[string]any) any {
+	if nested, ok := raw["message"].(map[string]any); ok {
+		if payload := rawMessageFieldsPayload(nested); payload != nil {
+			return payload
+		}
+	}
+	blocks, hasBlocks := raw["blocks"]
+	attachments, hasAttachments := raw["attachments"]
+	if !hasBlocks && !hasAttachments {
+		return nil
+	}
+	return []any{blocks, attachments}
 }
 
 func (c *Client) fetchChannels(ctx context.Context, workspaceID string) ([]slack.Channel, error) {
@@ -361,7 +401,7 @@ func (c *Client) syncChannelMessagesWithSource(ctx context.Context, st *store.St
 	cursor := ""
 	joined := false
 	for {
-		resp, err := c.getConversationHistory(ctx, source.historyClient, &slack.GetConversationHistoryParameters{
+		resp, err := c.getConversationHistory(ctx, source.token, &slack.GetConversationHistoryParameters{
 			ChannelID: channel.ID,
 			Cursor:    cursor,
 			Limit:     200,
@@ -389,11 +429,12 @@ func (c *Client) syncChannelMessagesWithSource(ctx context.Context, st *store.St
 			}
 			return fmt.Errorf("channel %s history: %w", channel.ID, err)
 		}
-		for _, msg := range resp.Messages {
+		for _, rawMsg := range resp.Messages {
+			msg := rawMsg.Message
 			if msg.Channel == "" {
 				msg.Channel = channel.ID
 			}
-			if err := st.UpsertMessage(ctx, toStoreMessage(workspaceID, msg, source.sourceName, source.sourceRank, now), toStoreMentions(msg)); err != nil {
+			if err := st.UpsertMessage(ctx, toStoreMessage(workspaceID, msg, source.sourceName, source.sourceRank, rawMsg.RawPayload, now), toStoreMentions(msg)); err != nil {
 				return err
 			}
 			if msg.ReplyCount > 0 && userRepliesAvailable {
@@ -402,17 +443,17 @@ func (c *Client) syncChannelMessagesWithSource(ctx context.Context, st *store.St
 				}
 			}
 		}
-		if resp.ResponseMetaData.NextCursor == "" {
+		if resp.NextCursor == "" {
 			return nil
 		}
-		cursor = resp.ResponseMetaData.NextCursor
+		cursor = resp.NextCursor
 	}
 }
 
 func (c *Client) syncThread(ctx context.Context, st *store.Store, workspaceID string, channelID string, threadTS string, now time.Time) error {
 	cursor := ""
 	for {
-		msgs, _, nextCursor, err := c.getConversationReplies(ctx, &slack.GetConversationRepliesParameters{
+		resp, err := c.getConversationReplies(ctx, &slack.GetConversationRepliesParameters{
 			ChannelID: channelID,
 			Timestamp: threadTS,
 			Cursor:    cursor,
@@ -421,18 +462,19 @@ func (c *Client) syncThread(ctx context.Context, st *store.Store, workspaceID st
 		if err != nil {
 			return err
 		}
-		for _, msg := range msgs {
+		for _, rawMsg := range resp.Messages {
+			msg := rawMsg.Message
 			if msg.Channel == "" {
 				msg.Channel = channelID
 			}
-			if err := st.UpsertMessage(ctx, toStoreMessage(workspaceID, msg, SourceUser, 1, now), toStoreMentions(msg)); err != nil {
+			if err := st.UpsertMessage(ctx, toStoreMessage(workspaceID, msg, SourceUser, 1, rawMsg.RawPayload, now), toStoreMentions(msg)); err != nil {
 				return err
 			}
 		}
-		if nextCursor == "" {
+		if resp.NextCursor == "" {
 			return nil
 		}
-		cursor = nextCursor
+		cursor = resp.NextCursor
 	}
 }
 
@@ -547,23 +589,193 @@ func (c *Client) getConversations(ctx context.Context, params *slack.GetConversa
 	return res.channels, res.nextCursor, err
 }
 
-func (c *Client) getConversationHistory(ctx context.Context, client *slack.Client, params *slack.GetConversationHistoryParameters) (*slack.GetConversationHistoryResponse, error) {
-	return retry(ctx, c.sleep, 3, func() (*slack.GetConversationHistoryResponse, error) {
-		return client.GetConversationHistoryContext(ctx, params)
+type rawConversationMessage struct {
+	Message    slack.Message
+	RawPayload any
+}
+
+type conversationHistoryPage struct {
+	Messages   []rawConversationMessage
+	NextCursor string
+}
+
+type conversationRepliesPage struct {
+	Messages   []rawConversationMessage
+	HasMore    bool
+	NextCursor string
+}
+
+type rawConversationHistoryResponse struct {
+	slack.SlackResponse
+	HasMore          bool   `json:"has_more"`
+	PinCount         int    `json:"pin_count"`
+	Latest           string `json:"latest"`
+	ResponseMetaData struct {
+		NextCursor string `json:"next_cursor"`
+	} `json:"response_metadata"`
+	Messages []json.RawMessage `json:"messages"`
+}
+
+type rawConversationRepliesResponse struct {
+	slack.SlackResponse
+	HasMore          bool `json:"has_more"`
+	ResponseMetaData struct {
+		NextCursor string `json:"next_cursor"`
+	} `json:"response_metadata"`
+	Messages []json.RawMessage `json:"messages"`
+}
+
+func (c *Client) getConversationHistory(ctx context.Context, token string, params *slack.GetConversationHistoryParameters) (*conversationHistoryPage, error) {
+	return retry(ctx, c.sleep, 3, func() (*conversationHistoryPage, error) {
+		values := conversationHistoryValues(params)
+		resp := rawConversationHistoryResponse{}
+		if err := c.postSlackForm(ctx, token, "conversations.history", values, &resp); err != nil {
+			return nil, err
+		}
+		if err := resp.Err(); err != nil {
+			return nil, err
+		}
+		messages, err := rawConversationMessages(resp.Messages)
+		if err != nil {
+			return nil, err
+		}
+		return &conversationHistoryPage{Messages: messages, NextCursor: resp.ResponseMetaData.NextCursor}, nil
 	})
 }
 
-func (c *Client) getConversationReplies(ctx context.Context, params *slack.GetConversationRepliesParameters) ([]slack.Message, bool, string, error) {
-	type result struct {
-		msgs       []slack.Message
-		hasMore    bool
-		nextCursor string
-	}
-	res, err := retry(ctx, c.sleep, 3, func() (result, error) {
-		msgs, hasMore, nextCursor, err := c.user.GetConversationRepliesContext(ctx, params)
-		return result{msgs: msgs, hasMore: hasMore, nextCursor: nextCursor}, err
+func (c *Client) getConversationReplies(ctx context.Context, params *slack.GetConversationRepliesParameters) (*conversationRepliesPage, error) {
+	return retry(ctx, c.sleep, 3, func() (*conversationRepliesPage, error) {
+		values := conversationRepliesValues(params)
+		resp := rawConversationRepliesResponse{}
+		if err := c.postSlackForm(ctx, c.tokens.User, "conversations.replies", values, &resp); err != nil {
+			return nil, err
+		}
+		if err := resp.Err(); err != nil {
+			return nil, err
+		}
+		messages, err := rawConversationMessages(resp.Messages)
+		if err != nil {
+			return nil, err
+		}
+		return &conversationRepliesPage{
+			Messages:   messages,
+			HasMore:    resp.HasMore,
+			NextCursor: resp.ResponseMetaData.NextCursor,
+		}, nil
 	})
-	return res.msgs, res.hasMore, res.nextCursor, err
+}
+
+func (c *Client) postSlackForm(ctx context.Context, token string, method string, values url.Values, target any) error {
+	values.Set("token", token)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+method, strings.NewReader(values.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusTooManyRequests && resp.Header.Get("Retry-After") != "" {
+		seconds, err := strconv.ParseInt(resp.Header.Get("Retry-After"), 10, 64)
+		if err != nil {
+			return err
+		}
+		return &slack.RateLimitedError{RetryAfter: time.Duration(seconds) * time.Second}
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("slack %s: %s", method, resp.Status)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(body, target); err != nil {
+		return fmt.Errorf("slack %s response: %w", method, err)
+	}
+	return nil
+}
+
+func conversationHistoryValues(params *slack.GetConversationHistoryParameters) url.Values {
+	values := url.Values{"channel": {params.ChannelID}}
+	if params.Cursor != "" {
+		values.Set("cursor", params.Cursor)
+	}
+	if params.Inclusive {
+		values.Set("inclusive", "1")
+	} else {
+		values.Set("inclusive", "0")
+	}
+	if params.Latest != "" {
+		values.Set("latest", params.Latest)
+	}
+	if params.Limit != 0 {
+		values.Set("limit", strconv.Itoa(params.Limit))
+	}
+	if params.Oldest != "" {
+		values.Set("oldest", params.Oldest)
+	}
+	if params.IncludeAllMetadata {
+		values.Set("include_all_metadata", "1")
+	} else {
+		values.Set("include_all_metadata", "0")
+	}
+	return values
+}
+
+func conversationRepliesValues(params *slack.GetConversationRepliesParameters) url.Values {
+	values := url.Values{
+		"channel": {params.ChannelID},
+		"ts":      {params.Timestamp},
+	}
+	if params.Cursor != "" {
+		values.Set("cursor", params.Cursor)
+	}
+	if params.Latest != "" {
+		values.Set("latest", params.Latest)
+	}
+	if params.Limit != 0 {
+		values.Set("limit", strconv.Itoa(params.Limit))
+	}
+	if params.Oldest != "" {
+		values.Set("oldest", params.Oldest)
+	}
+	if params.Inclusive {
+		values.Set("inclusive", "1")
+	} else {
+		values.Set("inclusive", "0")
+	}
+	if params.IncludeAllMetadata {
+		values.Set("include_all_metadata", "1")
+	} else {
+		values.Set("include_all_metadata", "0")
+	}
+	return values
+}
+
+func rawConversationMessages(rawMessages []json.RawMessage) ([]rawConversationMessage, error) {
+	messages := make([]rawConversationMessage, 0, len(rawMessages))
+	for _, raw := range rawMessages {
+		var msg slack.Message
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			return nil, err
+		}
+		messages = append(messages, rawConversationMessage{
+			Message:    msg,
+			RawPayload: rawPayloadFromMessageJSON(raw),
+		})
+	}
+	return messages, nil
+}
+
+func rawPayloadFromMessageJSON(rawMessage json.RawMessage) any {
+	var raw map[string]any
+	if err := json.Unmarshal(rawMessage, &raw); err != nil {
+		return nil
+	}
+	return rawMessageFieldsPayload(raw)
 }
 
 func (c *Client) getUsers(ctx context.Context, client *slack.Client) ([]slack.User, error) {
@@ -624,10 +836,14 @@ func toStoreUser(workspaceID string, user slack.User, now time.Time) store.User 
 	}
 }
 
-func toStoreMessage(workspaceID string, msg slack.Message, sourceName string, sourceRank int, now time.Time) store.Message {
+func toStoreMessage(workspaceID string, msg slack.Message, sourceName string, sourceRank int, rawPayload any, now time.Time) store.Message {
 	editedTS := ""
 	if msg.Edited != nil {
 		editedTS = msg.Edited.Timestamp
+	}
+	normalizedText := search.NormalizeMessage(msg)
+	if rawPayload != nil {
+		normalizedText = search.NormalizeMessageWithRawPayload(msg, rawPayload)
 	}
 	return store.Message{
 		ChannelID:      msg.Channel,
@@ -639,7 +855,7 @@ func toStoreMessage(workspaceID string, msg slack.Message, sourceName string, so
 		ThreadTS:       msg.ThreadTimestamp,
 		ParentUserID:   msg.ParentUserId,
 		Text:           msg.Text,
-		NormalizedText: search.NormalizeMessage(msg),
+		NormalizedText: normalizedText,
 		ReplyCount:     msg.ReplyCount,
 		LatestReply:    msg.LatestReply,
 		EditedTS:       editedTS,
@@ -775,6 +991,7 @@ func tickerChan(ticker *time.Ticker) <-chan time.Time {
 
 type channelSyncSource struct {
 	historyClient    *slack.Client
+	token            string
 	sourceName       string
 	sourceRank       int
 	allowJoin        bool
@@ -784,6 +1001,7 @@ type channelSyncSource struct {
 func (c *Client) syncChannels(ctx context.Context, st *store.Store, workspaceID string, channels []slack.Channel, opts SyncOptions, now time.Time, userRepliesAvailable bool) error {
 	return c.syncChannelsWithSource(ctx, st, workspaceID, channels, opts, now, userRepliesAvailable, channelSyncSource{
 		historyClient: c.bot,
+		token:         c.tokens.Bot,
 		sourceName:    SourceBot,
 		sourceRank:    2,
 		allowJoin:     true,
@@ -970,7 +1188,7 @@ func (c *Client) dmMissingScope(ctx context.Context, workspaceID string) string 
 	}
 
 	if sampleIM != "" {
-		_, historyErr := c.getConversationHistory(ctx, c.user, &slack.GetConversationHistoryParameters{
+		_, historyErr := c.getConversationHistory(ctx, c.tokens.User, &slack.GetConversationHistoryParameters{
 			ChannelID: sampleIM,
 			Limit:     1,
 		})
@@ -979,7 +1197,7 @@ func (c *Client) dmMissingScope(ctx context.Context, workspaceID string) string 
 		}
 	}
 	if sampleMPIM != "" {
-		_, historyErr := c.getConversationHistory(ctx, c.user, &slack.GetConversationHistoryParameters{
+		_, historyErr := c.getConversationHistory(ctx, c.tokens.User, &slack.GetConversationHistoryParameters{
 			ChannelID: sampleMPIM,
 			Limit:     1,
 		})

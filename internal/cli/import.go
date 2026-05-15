@@ -311,23 +311,32 @@ func toStoreMessage(workspaceID, channelID string, raw map[string]any, now time.
 		}
 	}
 	editedTS := editedTimestamp(raw["edited"])
-	message := slack.Message{Msg: slack.Msg{
-		Channel:          channelID,
-		Timestamp:        ts,
-		User:             stringValue(raw["user"]),
-		SubType:          subtype,
-		ClientMsgID:      stringValue(raw["client_msg_id"]),
-		ThreadTimestamp:  stringValue(raw["thread_ts"]),
-		ParentUserId:     stringValue(raw["parent_user_id"]),
-		Text:             text,
-		ReplyCount:       intValue(raw["reply_count"]),
-		LatestReply:      stringValue(raw["latest_reply"]),
-		DeletedTimestamp: stringValue(raw["deleted_ts"]),
-	}}
+	var message slack.Message
+	if body, err := json.Marshal(raw); err == nil {
+		_ = json.Unmarshal(body, &message)
+	}
+	message.Channel = channelID
+	message.Timestamp = ts
+	message.User = stringValue(raw["user"])
+	message.SubType = subtype
+	message.ClientMsgID = stringValue(raw["client_msg_id"])
+	message.ThreadTimestamp = stringValue(raw["thread_ts"])
+	message.ParentUserId = stringValue(raw["parent_user_id"])
+	message.Text = text
+	message.ReplyCount = intValue(raw["reply_count"])
+	message.LatestReply = stringValue(raw["latest_reply"])
+	message.DeletedTimestamp = stringValue(raw["deleted_ts"])
+	if message.Type == "" {
+		message.Type = stringValue(raw["type"])
+	}
+	if message.Type == "" {
+		message.Type = "message"
+	}
 	if editedTS != "" {
 		message.Edited = &slack.Edited{Timestamp: editedTS}
 	}
 	message.Files = slackFilesFromRaw(raw["files"])
+	normalizedText := search.NormalizeMessageWithRawPayload(message, []any{raw["blocks"], raw["attachments"]})
 
 	rawMentions := search.ExtractMentions(text)
 	mentions := make([]store.Mention, 0, len(rawMentions))
@@ -349,7 +358,7 @@ func toStoreMessage(workspaceID, channelID string, raw map[string]any, now time.
 		ThreadTS:       message.ThreadTimestamp,
 		ParentUserID:   message.ParentUserId,
 		Text:           text,
-		NormalizedText: search.NormalizeMessage(message),
+		NormalizedText: normalizedText,
 		ReplyCount:     message.ReplyCount,
 		LatestReply:    message.LatestReply,
 		EditedTS:       editedTS,

@@ -1,6 +1,7 @@
 package search
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/slack-go/slack"
@@ -54,6 +55,190 @@ func TestNormalizeMessageUnescapesSlackEntities(t *testing.T) {
 	require.Contains(t, normalized, "&lt;div&gt;")
 	require.NotContains(t, normalized, "AT&amp;T &lt;tag&gt;")
 	require.NotContains(t, normalized, "docs &amp; faq")
+}
+
+func TestNormalizeMessageIncludesBlocksAndAttachments(t *testing.T) {
+	msg := slack.Message{}
+	msg.Blocks = slack.Blocks{BlockSet: []slack.Block{
+		slack.NewHeaderBlock(slack.NewTextBlockObject("plain_text", "Release Notes", false, false)),
+		slack.NewSectionBlock(
+			slack.NewTextBlockObject("mrkdwn", "Deploy <https://example.com/runbook|runbook> &amp; checklist", false, false),
+			[]*slack.TextBlockObject{
+				slack.NewTextBlockObject("mrkdwn", "*Impact* checkout", false, false),
+			},
+			nil,
+		),
+		slack.NewContextBlock("ctx", slack.NewTextBlockObject("mrkdwn", "Context <@U123|alice>", false, false)),
+		slack.NewActionBlock("actions", slack.NewButtonBlockElement("ack", "ack", slack.NewTextBlockObject("plain_text", "Acknowledge", false, false))),
+		slack.NewContextActionsBlock("ctx-actions", slack.NewButtonBlockElement("open", "open", slack.NewTextBlockObject("plain_text", "Open issue", false, false))),
+		slack.NewImageBlock("https://example.com/diagram.png", "Architecture Diagram", "img", nil),
+	}}
+	msg.Attachments = []slack.Attachment{{
+		Pretext: "PagerDuty",
+		Title:   "Incident &amp; response",
+		Text:    "service degraded in <#C123|eng>",
+		Fields: []slack.AttachmentField{
+			{Title: "Severity", Value: "SEV2"},
+		},
+	}}
+
+	normalized := NormalizeMessage(msg)
+	require.Contains(t, normalized, "Release Notes")
+	require.Contains(t, normalized, "Deploy runbook https://example.com/runbook & checklist")
+	require.Contains(t, normalized, "Impact")
+	require.Contains(t, normalized, "checkout")
+	require.Contains(t, normalized, "Context @alice")
+	require.Contains(t, normalized, "Acknowledge")
+	require.Contains(t, normalized, "Open issue")
+	require.Contains(t, normalized, "Architecture Diagram")
+	require.Contains(t, normalized, "PagerDuty")
+	require.Contains(t, normalized, "Incident & response")
+	require.Contains(t, normalized, "service degraded in #eng")
+	require.Contains(t, normalized, "Severity")
+	require.Contains(t, normalized, "SEV2")
+}
+
+func TestNormalizeMessageDeduplicatesFallbackBlockText(t *testing.T) {
+	msg := slack.Message{}
+	msg.Text = "hello from fallback"
+	msg.Blocks = slack.Blocks{BlockSet: []slack.Block{
+		slack.NewSectionBlock(slack.NewTextBlockObject("mrkdwn", "hello from fallback", false, false), nil, nil),
+	}}
+
+	require.Equal(t, "hello from fallback", NormalizeMessage(msg))
+}
+
+func TestNormalizeMessageWithRawPayloadKeepsSubstringLabels(t *testing.T) {
+	msg := slack.Message{}
+	msg.Text = "dragon"
+	raw := []any{map[string]any{
+		"type": "unknown_new",
+		"text": "go",
+	}}
+
+	require.Equal(t, "dragon go", NormalizeMessageWithRawPayload(msg, raw))
+}
+
+func TestNormalizeMessageIncludesRichBlocksAndActionElements(t *testing.T) {
+	msg := slack.Message{}
+	initialOption := slack.NewOptionBlockObject(
+		"release-manager",
+		slack.NewTextBlockObject("plain_text", "Release manager", false, false),
+		slack.NewTextBlockObject("plain_text", "Owns deployment", false, false),
+	)
+	secondInitialOption := slack.NewOptionBlockObject(
+		"incident-commander",
+		slack.NewTextBlockObject("plain_text", "Incident commander", false, false),
+		nil,
+	)
+	richDetails := slack.NewRichTextBlock("details",
+		slack.NewRichTextSection(
+			slack.NewRichTextSectionTextElement("rich detail", nil),
+			slack.NewRichTextSectionLinkElement("https://example.com/rich", "rich link", nil),
+		),
+	)
+	msg.Blocks = slack.Blocks{BlockSet: []slack.Block{
+		richDetails,
+		slack.NewTableBlock("table").AddRow(
+			slack.NewRichTextBlock("cell", slack.NewRichTextSection(slack.NewRichTextSectionTextElement("table cell", nil))),
+		),
+		slack.NewTaskCardBlock("task-1", "Task title").WithDetails(
+			slack.NewRichTextBlock("task-details", slack.NewRichTextSection(slack.NewRichTextSectionTextElement("task detail", nil))),
+		).WithSources(slack.NewTaskCardSource("https://example.com/source", "source label")),
+		slack.NewPlanBlock("Plan title").WithTasks(
+			slack.NewTaskCardBlock("task-2", "Nested task"),
+		),
+		slack.NewCarouselBlock(slack.NewCardBlock().
+			WithTitle(slack.NewTextBlockObject("plain_text", "Carousel card", false, false)).
+			WithHeroImage(slack.NewImageBlockElement("https://example.com/hero.png", "Carousel hero")).
+			WithActions(slack.NewButtonBlockElement("view", "view", slack.NewTextBlockObject("plain_text", "View card", false, false))),
+		),
+		slack.NewActionBlock("pickers",
+			&slack.DatePickerBlockElement{
+				Type:        slack.METDatepicker,
+				Placeholder: slack.NewTextBlockObject("plain_text", "Pick date", false, false),
+				InitialDate: "2026-05-15",
+			},
+			&slack.TimePickerBlockElement{
+				Type:        slack.METTimepicker,
+				Placeholder: slack.NewTextBlockObject("plain_text", "Pick time", false, false),
+				InitialTime: "09:30",
+			},
+			&slack.DateTimePickerBlockElement{
+				Type:            slack.METDatetimepicker,
+				InitialDateTime: 1778847000,
+			},
+			slack.NewFeedbackButtonsBlockElement(
+				"feedback",
+				slack.NewFeedbackButton(slack.NewTextBlockObject("plain_text", "Helpful", false, false), "yes").WithAccessibilityLabel("Mark helpful"),
+				slack.NewFeedbackButton(slack.NewTextBlockObject("plain_text", "Not helpful", false, false), "no"),
+			),
+			slack.NewIconButtonBlockElement(
+				"trash",
+				slack.NewTextBlockObject("plain_text", "Delete response", false, false),
+				"delete",
+			).WithAccessibilityLabel("Remove response"),
+			slack.NewOptionsSelectBlockElement(
+				slack.OptTypeExternal,
+				slack.NewTextBlockObject("plain_text", "Select owner", false, false),
+				"owner",
+			).WithInitialOption(initialOption),
+			slack.NewOptionsMultiSelectBlockElement(
+				slack.MultiOptTypeExternal,
+				slack.NewTextBlockObject("plain_text", "Select roles", false, false),
+				"roles",
+			).WithInitialOptions(secondInitialOption),
+		),
+	}}
+
+	normalized := NormalizeMessage(msg)
+	for _, want := range []string{
+		"rich detail",
+		"rich link",
+		"https://example.com/rich",
+		"table cell",
+		"Task title",
+		"task detail",
+		"source label",
+		"https://example.com/source",
+		"Plan title",
+		"Nested task",
+		"Carousel card",
+		"Carousel hero",
+		"View card",
+		"Pick date",
+		"2026-05-15",
+		"Pick time",
+		"09:30",
+		"1778847000",
+		"Helpful",
+		"Mark helpful",
+		"Not helpful",
+		"Delete response",
+		"Remove response",
+		"Select owner",
+		"Release manager",
+		"Owns deployment",
+		"Select roles",
+		"Incident commander",
+	} {
+		require.Contains(t, normalized, want)
+	}
+}
+
+func TestNormalizeMessageIncludesUnknownBlockText(t *testing.T) {
+	var msg slack.Message
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"type": "message",
+		"ts": "1.0",
+		"blocks": [
+			{"type": "new_block", "title": "unknown title", "text": {"type": "mrkdwn", "text": "unknown body"}}
+		]
+	}`), &msg))
+
+	normalized := NormalizeMessage(msg)
+	require.Contains(t, normalized, "unknown title")
+	require.Contains(t, normalized, "unknown body")
 }
 
 func TestExtractMentionsSanitizesNoisyText(t *testing.T) {

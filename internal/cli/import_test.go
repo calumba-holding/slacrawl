@@ -30,7 +30,10 @@ func TestImportCommandJSON(t *testing.T) {
 		"channels.json": `[{"id":"C1","name":"general","is_private":false}]`,
 		"general/2026-01-01.json": `[
 			{"type":"message","user":"U1","text":"keep-existing","ts":"1735689600.000001"},
-			{"type":"message","user":"U1","text":"new-message","ts":"1735689600.000002"}
+			{"type":"message","user":"U1","text":"new-message","ts":"1735689600.000002"},
+			{"type":"message","user":"U1","text":"","ts":"1735689600.000003","blocks":[{"type":"section","text":{"type":"mrkdwn","text":"block only payload"}}],"attachments":[{"title":"attachment title","text":"attachment body"}]},
+			{"type":"message","user":"U1","text":"","ts":"1735689600.000004","blocks":[{"type":"section","text":{"type":"mrkdwn","text":"supported block before unknown"}},{"type":"actions","elements":[{"type":"unknown_new","text":{"type":"plain_text","text":"unknown action label"}}]}]},
+			{"type":"message","user":"U1","text":"","ts":"1735689600.000005","blocks":[{"type":"section","text":{"type":"mrkdwn","text":"section with accessory"},"accessory":{"type":"icon_button","text":{"type":"plain_text","text":"Delete response"},"accessibility_label":"Remove response","value":"delete","url":"https://hidden.example/delete","confirm":{"title":{"type":"plain_text","text":"Hidden confirm title"},"text":{"type":"mrkdwn","text":"Hidden confirm body"},"confirm":{"type":"plain_text","text":"Hidden yes"},"deny":{"type":"plain_text","text":"Hidden no"}}}}]}
 		]`,
 	})
 
@@ -61,7 +64,7 @@ func TestImportCommandJSON(t *testing.T) {
 	require.Equal(t, "T123", report.Workspace)
 	require.Equal(t, 1, report.Users)
 	require.Equal(t, 1, report.Channels)
-	require.Equal(t, 1, report.Messages)
+	require.Equal(t, 4, report.Messages)
 	require.Equal(t, 1, report.Skipped)
 	require.False(t, report.DryRun)
 
@@ -70,16 +73,27 @@ func TestImportCommandJSON(t *testing.T) {
 	defer func() { require.NoError(t, st.Close()) }()
 
 	rows, err := st.QueryReadOnly(ctx, `
-select ts, source_name, source_rank, text
+select ts, source_name, source_rank, text, normalized_text
 from messages
 where channel_id = 'C1'
 order by ts asc`)
 	require.NoError(t, err)
-	require.Len(t, rows, 2)
+	require.Len(t, rows, 5)
 	require.Equal(t, "api-bot", rows[0]["source_name"])
 	require.Equal(t, int64(2), rows[0]["source_rank"])
 	require.Equal(t, "slack-export", rows[1]["source_name"])
 	require.Equal(t, int64(2), rows[1]["source_rank"])
+	require.Contains(t, rows[2]["normalized_text"], "block only payload")
+	require.Contains(t, rows[2]["normalized_text"], "attachment title")
+	require.Contains(t, rows[2]["normalized_text"], "attachment body")
+	require.Contains(t, rows[3]["normalized_text"], "supported block before unknown")
+	require.Contains(t, rows[3]["normalized_text"], "unknown action label")
+	require.Contains(t, rows[4]["normalized_text"], "section with accessory")
+	require.Contains(t, rows[4]["normalized_text"], "Delete response")
+	require.Contains(t, rows[4]["normalized_text"], "Remove response")
+	require.NotContains(t, rows[4]["normalized_text"], "delete")
+	require.NotContains(t, rows[4]["normalized_text"], "https://hidden.example/delete")
+	require.NotContains(t, rows[4]["normalized_text"], "Hidden confirm")
 }
 
 func writeImportFixtureZip(t *testing.T, files map[string]string) string {

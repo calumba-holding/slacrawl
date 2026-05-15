@@ -56,6 +56,58 @@ func TestSyncHandlesRateLimitAndThreadCoverage(t *testing.T) {
 	require.Equal(t, "message_replied", rows[0].Subtype)
 }
 
+func TestSyncIndexesRawHistoryBlockPayload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth.test":
+			_, _ = w.Write([]byte(`{"ok":true,"team":"Test Team","team_id":"T123","user":"bot","user_id":"Ubot","bot_id":"B123"}`))
+		case "/conversations.list":
+			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"general","is_channel":true}],"response_metadata":{"next_cursor":""}}`))
+		case "/conversations.history":
+			_, _ = w.Write([]byte(`{"ok":true,"messages":[{
+				"type":"message",
+				"user":"U123",
+				"text":"",
+				"ts":"1710000000.000100",
+				"blocks":[{
+					"type":"section",
+					"text":{"type":"mrkdwn","text":"section body"},
+					"accessory":{
+						"type":"icon_button",
+						"text":{"type":"plain_text","text":"Delete response"},
+						"accessibility_label":"Remove response",
+						"value":"delete",
+						"url":"https://hidden.example/delete",
+						"confirm":{"title":{"type":"plain_text","text":"Hidden confirm"}}
+					}
+				}]
+			}],"response_metadata":{"next_cursor":""}}`))
+		case "/users.list":
+			_, _ = w.Write([]byte(`{"ok":true,"members":[],"response_metadata":{"next_cursor":""}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewWithOptions(config.Tokens{Bot: "xoxb-test"}, server.URL+"/", server.Client())
+	client.sleep = func(context.Context, time.Duration) error { return nil }
+	st := mustStore(t)
+	defer func() { require.NoError(t, st.Close()) }()
+
+	require.NoError(t, client.Sync(context.Background(), st, SyncOptions{}))
+
+	rows, err := st.Search(context.Background(), "T123", "Remove", 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Contains(t, rows[0].NormalizedText, "Delete response")
+	require.Contains(t, rows[0].NormalizedText, "Remove response")
+	require.NotContains(t, rows[0].NormalizedText, "delete")
+	require.NotContains(t, rows[0].NormalizedText, "https://hidden.example/delete")
+	require.NotContains(t, rows[0].NormalizedText, "Hidden confirm")
+}
+
 func TestSyncWithoutUserTokenMarksPartialCoverage(t *testing.T) {
 	server := newMockSlackServer(t)
 	defer server.Close()
@@ -381,6 +433,41 @@ func TestHandleEventsAPIEventUpdatesStore(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleEventsAPIEvent(ctx, st, "T123", event))
 
+	rawBlockMessage := []byte(`{
+	  "token":"ignored",
+	  "team_id":"T123",
+	  "api_app_id":"A123",
+	  "type":"event_callback",
+	  "event":{
+	    "type":"message",
+	    "channel":"C123",
+	    "user":"U123",
+	    "text":"",
+	    "ts":"1710000000.000200",
+	    "event_ts":"1710000000.000200",
+	    "blocks":[{
+	      "type":"section",
+	      "text":{"type":"mrkdwn","text":"section with accessory"},
+	      "accessory":{
+	        "type":"icon_button",
+	        "text":{"type":"plain_text","text":"Delete response"},
+	        "accessibility_label":"Remove response",
+	        "value":"delete",
+	        "url":"https://hidden.example/delete",
+	        "confirm":{
+	          "title":{"type":"plain_text","text":"Hidden confirm title"},
+	          "text":{"type":"mrkdwn","text":"Hidden confirm body"},
+	          "confirm":{"type":"plain_text","text":"Hidden yes"},
+	          "deny":{"type":"plain_text","text":"Hidden no"}
+	        }
+	      }
+	    }]
+	  }
+	}`)
+	blockEvent, err := slackevents.ParseEvent(rawBlockMessage, slackevents.OptionNoVerifyToken())
+	require.NoError(t, err)
+	require.NoError(t, client.HandleEventsAPIEvent(ctx, st, "T123", blockEvent))
+
 	rawRename := []byte(`{
 	  "token":"ignored",
 	  "team_id":"T123",
@@ -398,8 +485,66 @@ func TestHandleEventsAPIEventUpdatesStore(t *testing.T) {
 
 	rows, err := st.Messages(ctx, "", "C123", "", 10)
 	require.NoError(t, err)
-	require.Len(t, rows, 1)
-	require.True(t, strings.Contains(rows[0].NormalizedText, "@alex"))
+	require.Len(t, rows, 2)
+	require.True(t, strings.Contains(rows[1].NormalizedText, "@alex"))
+
+	searchRows, err := st.Search(ctx, "T123", "Remove", 10)
+	require.NoError(t, err)
+	require.Len(t, searchRows, 1)
+	require.Equal(t, "1710000000.000200", searchRows[0].TS)
+	require.Contains(t, searchRows[0].NormalizedText, "Delete response")
+	require.Contains(t, searchRows[0].NormalizedText, "Remove response")
+	require.NotContains(t, searchRows[0].NormalizedText, "delete")
+	require.NotContains(t, searchRows[0].NormalizedText, "https://hidden.example/delete")
+	require.NotContains(t, searchRows[0].NormalizedText, "Hidden confirm")
+
+	rawBlockEdit := []byte(`{
+	  "token":"ignored",
+	  "team_id":"T123",
+	  "api_app_id":"A123",
+	  "type":"event_callback",
+	  "event":{
+	    "type":"message",
+	    "subtype":"message_changed",
+	    "channel":"C123",
+	    "event_ts":"1710000000.000300",
+	    "message":{
+	      "type":"message",
+	      "channel":"C123",
+	      "user":"U123",
+	      "text":"",
+	      "ts":"1710000000.000200",
+	      "edited":{"user":"U123","ts":"1710000000.000300"},
+	      "blocks":[{
+	        "type":"section",
+	        "text":{"type":"mrkdwn","text":"edited section"},
+	        "accessory":{
+	          "type":"icon_button",
+	          "text":{"type":"plain_text","text":"Archive response"},
+	          "accessibility_label":"Hide response",
+	          "value":"archive"
+	        }
+	      }]
+	    },
+	    "previous_message":{
+	      "type":"message",
+	      "channel":"C123",
+	      "user":"U123",
+	      "text":"",
+	      "ts":"1710000000.000200"
+	    }
+	  }
+	}`)
+	editEvent, err := slackevents.ParseEvent(rawBlockEdit, slackevents.OptionNoVerifyToken())
+	require.NoError(t, err)
+	require.NoError(t, client.HandleEventsAPIEvent(ctx, st, "T123", editEvent))
+
+	editRows, err := st.Search(ctx, "T123", "Hide", 10)
+	require.NoError(t, err)
+	require.Len(t, editRows, 1)
+	require.Contains(t, editRows[0].NormalizedText, "Archive response")
+	require.Contains(t, editRows[0].NormalizedText, "Hide response")
+	require.NotContains(t, editRows[0].NormalizedText, "archive")
 
 	channels, err := st.Channels(ctx, "", "renamed", 10)
 	require.NoError(t, err)
