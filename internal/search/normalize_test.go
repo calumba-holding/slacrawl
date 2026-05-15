@@ -41,12 +41,13 @@ func TestNormalizeMessageSanitizesMalformedUnicodeAndWhitespace(t *testing.T) {
 
 func TestNormalizeMessageUnescapesSlackEntities(t *testing.T) {
 	msg := slack.Message{}
-	msg.Text = "AT&amp;T &lt;tag&gt; <https://example.com?q=AT&amp;T|docs &amp; faq>"
+	msg.Text = "AT&amp;T &lt;tag&gt; <https://example.com?q=AT&amp;T|docs &amp; faq> <https://example.com/math|1 &gt; 0>"
 
 	normalized := NormalizeMessage(msg)
 	require.Contains(t, normalized, "AT&T")
 	require.Contains(t, normalized, "tag")
 	require.Contains(t, normalized, "docs & faq https://example.com?q=AT&T")
+	require.Contains(t, normalized, "1 > 0 https://example.com/math")
 	require.NotContains(t, normalized, "&amp;")
 	require.NotContains(t, normalized, "&lt;")
 }

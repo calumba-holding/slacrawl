@@ -28,16 +28,16 @@ func NormalizeMessage(msg slack.Message) string {
 	text = userMentionRe.ReplaceAllStringFunc(text, func(match string) string {
 		parts := userMentionRe.FindStringSubmatch(match)
 		if parts[2] != "" {
-			return "@" + parts[2]
+			return "@" + html.UnescapeString(parts[2])
 		}
-		return "@" + parts[1]
+		return "@" + html.UnescapeString(parts[1])
 	})
 	text = channelMentionRe.ReplaceAllStringFunc(text, func(match string) string {
 		parts := channelMentionRe.FindStringSubmatch(match)
 		if parts[2] != "" {
-			return "#" + parts[2]
+			return "#" + html.UnescapeString(parts[2])
 		}
-		return "#" + parts[1]
+		return "#" + html.UnescapeString(parts[1])
 	})
 	text = linkRe.ReplaceAllStringFunc(text, func(match string) string {
 		parts := linkRe.FindStringSubmatch(match)
@@ -48,24 +48,25 @@ func NormalizeMessage(msg slack.Message) string {
 			return match
 		}
 		if parts[2] != "" {
-			return parts[2] + " " + parts[1]
+			return html.UnescapeString(parts[2]) + " " + html.UnescapeString(parts[1])
 		}
-		return parts[1]
+		return html.UnescapeString(parts[1])
 	})
+	text = sanitizeText(html.UnescapeString(text))
 
 	parts := []string{strings.TrimSpace(text)}
 	for _, file := range msg.Files {
 		if file.Title != "" {
-			parts = append(parts, sanitizeText(file.Title))
+			parts = append(parts, sanitizeDisplayText(file.Title))
 		}
 		if file.Name != "" && file.Name != file.Title {
-			parts = append(parts, sanitizeText(file.Name))
+			parts = append(parts, sanitizeDisplayText(file.Name))
 		}
 		if file.PlainText != "" {
-			parts = append(parts, sanitizeText(file.PlainText))
+			parts = append(parts, sanitizeDisplayText(file.PlainText))
 		}
 		if file.PreviewPlainText != "" && file.PreviewPlainText != file.PlainText {
-			parts = append(parts, sanitizeText(file.PreviewPlainText))
+			parts = append(parts, sanitizeDisplayText(file.PreviewPlainText))
 		}
 	}
 	if msg.Edited != nil {
@@ -81,7 +82,7 @@ func NormalizeMessage(msg slack.Message) string {
 }
 
 func ExtractMentions(text string) []Mention {
-	text = sanitizeText(text)
+	text = sanitizeDisplayText(text)
 	var mentions []Mention
 	for _, match := range userMentionRe.FindAllStringSubmatch(text, -1) {
 		mentions = append(mentions, Mention{
@@ -122,7 +123,6 @@ func sanitizeText(raw string) string {
 		return ""
 	}
 	raw = strings.ToValidUTF8(raw, "\uFFFD")
-	raw = html.UnescapeString(raw)
 	raw = norm.NFKC.String(raw)
 	var b strings.Builder
 	b.Grow(len(raw))
@@ -143,6 +143,10 @@ func sanitizeText(raw string) string {
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func sanitizeDisplayText(raw string) string {
+	return sanitizeText(html.UnescapeString(raw))
 }
 
 func isIgnoredRune(r rune) bool {
