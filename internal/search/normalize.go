@@ -1,6 +1,7 @@
 package search
 
 import (
+	"html"
 	"regexp"
 	"strings"
 	"unicode"
@@ -121,6 +122,7 @@ func sanitizeText(raw string) string {
 		return ""
 	}
 	raw = strings.ToValidUTF8(raw, "\uFFFD")
+	raw = html.UnescapeString(raw)
 	raw = norm.NFKC.String(raw)
 	var b strings.Builder
 	b.Grow(len(raw))

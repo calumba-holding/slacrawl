@@ -15,5 +15,6 @@
 - Indexed mentions when a live deleted-message event creates a tombstone row before the original message was archived.
 - Preserved archived reply and file metadata when live deleted-message events mark an existing message deleted.
 - Refreshed message search text when live deleted-message events mark an existing message deleted.
+- Slack HTML entities are now decoded before indexing message search text and mentions.
 - Socket Mode live tail now ACKs Slack events only after they are persisted.
 - `search --help`, `messages --help`, and `sql --help` now print command help without loading config, and `search --limit N` supports bounded result sets.
