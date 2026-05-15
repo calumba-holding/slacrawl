@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,6 +114,56 @@ func TestImportRejectsEscapedManifestTablePath(t *testing.T) {
 	_, err = Import(ctx, reader, opts)
 	require.ErrorContains(t, err, "path escapes share repo")
 	assertArchiveStillPresent(t, ctx, reader)
+}
+
+func TestPullPreservesLocalCommitsAheadOfOrigin(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	remoteWork := filepath.Join(dir, "remote-work")
+	remoteRepo := filepath.Join(dir, "remote.git")
+	shareRepo := filepath.Join(dir, "share")
+
+	require.NoError(t, gitRun(ctx, "", "init", "-b", "main", remoteWork))
+	require.NoError(t, os.WriteFile(filepath.Join(remoteWork, "manifest.json"), []byte("{}\n"), 0o600))
+	testGitCommit(t, ctx, remoteWork, "seed")
+	require.NoError(t, gitRun(ctx, "", "clone", "--bare", remoteWork, remoteRepo))
+
+	opts := Options{RepoPath: shareRepo, Remote: remoteRepo, Branch: "main"}
+	require.NoError(t, Pull(ctx, opts))
+	require.NoError(t, os.WriteFile(filepath.Join(shareRepo, "local.txt"), []byte("local\n"), 0o600))
+	testGitCommit(t, ctx, shareRepo, "local")
+	localHead, err := gitOutput(ctx, shareRepo, "rev-parse", "HEAD")
+	require.NoError(t, err)
+	originHead, err := gitOutput(ctx, shareRepo, "rev-parse", "origin/main")
+	require.NoError(t, err)
+	require.NotEqual(t, strings.TrimSpace(originHead), strings.TrimSpace(localHead))
+
+	require.NoError(t, Pull(ctx, opts))
+	afterHead, err := gitOutput(ctx, shareRepo, "rev-parse", "HEAD")
+	require.NoError(t, err)
+	require.Equal(t, strings.TrimSpace(localHead), strings.TrimSpace(afterHead))
+}
+
+func TestPullInitializesRequestedRemoteBranchOnClone(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	remoteWork := filepath.Join(dir, "remote-work")
+	remoteRepo := filepath.Join(dir, "remote.git")
+	shareRepo := filepath.Join(dir, "share")
+
+	require.NoError(t, gitRun(ctx, "", "init", "-b", "main", remoteWork))
+	require.NoError(t, os.WriteFile(filepath.Join(remoteWork, "manifest.json"), []byte("release\n"), 0o600))
+	testGitCommit(t, ctx, remoteWork, "release")
+	require.NoError(t, gitRun(ctx, remoteWork, "branch", "release"))
+	require.NoError(t, os.WriteFile(filepath.Join(remoteWork, "manifest.json"), []byte("main\n"), 0o600))
+	testGitCommit(t, ctx, remoteWork, "main")
+	require.NoError(t, gitRun(ctx, "", "clone", "--bare", remoteWork, remoteRepo))
+
+	opts := Options{RepoPath: shareRepo, Remote: remoteRepo, Branch: "release"}
+	require.NoError(t, Pull(ctx, opts))
+	body, err := os.ReadFile(filepath.Join(shareRepo, "manifest.json"))
+	require.NoError(t, err)
+	require.Equal(t, "release\n", string(body))
 }
 
 func TestImportIfChangedSkipsCurrentManifest(t *testing.T) {
@@ -246,6 +297,17 @@ func assertArchiveStillPresent(t *testing.T, ctx context.Context, s *store.Store
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, "git backed archive works", rows[0].Text)
+}
+
+func testGitCommit(t *testing.T, ctx context.Context, repoPath string, message string) {
+	t.Helper()
+	require.NoError(t, gitRun(ctx, repoPath, "add", "."))
+	require.NoError(t, gitRun(ctx, repoPath,
+		"-c", "commit.gpgsign=false",
+		"-c", "user.name=slacrawl-test",
+		"-c", "user.email=slacrawl-test@example.invalid",
+		"commit", "-m", message,
+	))
 }
 
 func seedStore(t *testing.T, path string) *store.Store {

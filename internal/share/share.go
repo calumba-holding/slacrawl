@@ -107,6 +107,10 @@ func EnsureRepo(ctx context.Context, opts Options) error {
 			return err
 		}
 		if branch := normalizeBranch(opts.Branch); branch != "" {
+			remoteRef := "refs/remotes/origin/" + branch
+			if _, err := gitOutput(ctx, opts.RepoPath, "rev-parse", "--verify", remoteRef); err == nil {
+				return gitRun(ctx, opts.RepoPath, "checkout", "-B", branch, "origin/"+branch)
+			}
 			if err := gitRun(ctx, opts.RepoPath, "checkout", "-B", branch); err != nil {
 				return err
 			}
@@ -139,7 +143,21 @@ func Pull(ctx context.Context, opts Options) error {
 	}
 	branch := normalizeBranch(opts.Branch)
 	remoteRef := "refs/remotes/origin/" + branch
-	if _, err := gitOutput(ctx, opts.RepoPath, "rev-parse", "--verify", remoteRef); err != nil {
+	_, remoteErr := gitOutput(ctx, opts.RepoPath, "rev-parse", "--verify", remoteRef)
+	_, localErr := gitOutput(ctx, opts.RepoPath, "rev-parse", "--verify", "refs/heads/"+branch)
+	if localErr == nil {
+		if err := gitRun(ctx, opts.RepoPath, "checkout", branch); err != nil {
+			return err
+		}
+		if remoteErr != nil {
+			return nil
+		}
+		if err := gitRun(ctx, opts.RepoPath, "merge", "--ff-only", "origin/"+branch); err != nil {
+			return fmt.Errorf("fast-forward %s from origin/%s: %w", branch, branch, err)
+		}
+		return nil
+	}
+	if remoteErr != nil {
 		return gitRun(ctx, opts.RepoPath, "checkout", "-B", branch)
 	}
 	return gitRun(ctx, opts.RepoPath, "checkout", "-B", branch, "origin/"+branch)
