@@ -86,23 +86,23 @@ func BuildDigest(ctx context.Context, s *store.Store, opts DigestOptions) (Diges
 		TopN:        topN,
 	}
 
-	channels, err := perChannel(ctx, s.DB(), digest.Since, opts.WorkspaceID, opts.Channel)
+	channels, err := perChannel(ctx, s.DB(), digest.Since, digest.Until, opts.WorkspaceID, opts.Channel)
 	if err != nil {
 		return Digest{}, err
 	}
 	for i := range channels {
-		channels[i].TopPosters, err = topPostersForChannel(ctx, s.DB(), digest.Since, channels[i].WorkspaceID, channels[i].ChannelID, topN)
+		channels[i].TopPosters, err = topPostersForChannel(ctx, s.DB(), digest.Since, digest.Until, channels[i].WorkspaceID, channels[i].ChannelID, topN)
 		if err != nil {
 			return Digest{}, err
 		}
-		channels[i].TopMentions, err = topMentionsForChannel(ctx, s.DB(), digest.Since, channels[i].WorkspaceID, channels[i].ChannelID, topN)
+		channels[i].TopMentions, err = topMentionsForChannel(ctx, s.DB(), digest.Since, digest.Until, channels[i].WorkspaceID, channels[i].ChannelID, topN)
 		if err != nil {
 			return Digest{}, err
 		}
 	}
 	digest.Channels = channels
 
-	totals, err := digestTotals(ctx, s.DB(), digest.Since, opts.WorkspaceID, opts.Channel)
+	totals, err := digestTotals(ctx, s.DB(), digest.Since, digest.Until, opts.WorkspaceID, opts.Channel)
 	if err != nil {
 		return Digest{}, err
 	}
@@ -112,7 +112,7 @@ func BuildDigest(ctx context.Context, s *store.Store, opts DigestOptions) (Diges
 }
 
 // perChannel returns one row per channel with messages, threads, and active-author counts for the window.
-func perChannel(ctx context.Context, db *sql.DB, since time.Time, workspaceID, channel string) ([]ChannelDigest, error) {
+func perChannel(ctx context.Context, db *sql.DB, since time.Time, until time.Time, workspaceID, channel string) ([]ChannelDigest, error) {
 	query := &strings.Builder{}
 	query.WriteString(`
 select
@@ -128,8 +128,9 @@ left join channels c on c.id = m.channel_id and c.workspace_id = m.workspace_id
 where m.ts not like 'draft:%'
   and instr(m.ts, '.') > 0
   and cast(substr(m.ts, 1, instr(m.ts, '.') - 1) as integer) >= ?
+  and m.ts <= ?
 `)
-	args := []any{since.Unix()}
+	args := []any{since.Unix(), slackTSBoundary(until)}
 	if workspaceID != "" {
 		query.WriteString("  and m.workspace_id = ?\n")
 		args = append(args, workspaceID)
@@ -159,7 +160,7 @@ order by messages desc, channel_name asc
 }
 
 // topPostersForChannel returns the top posters for a single channel.
-func topPostersForChannel(ctx context.Context, db *sql.DB, since time.Time, workspaceID, channelID string, limit int) ([]RankedCount, error) {
+func topPostersForChannel(ctx context.Context, db *sql.DB, since time.Time, until time.Time, workspaceID, channelID string, limit int) ([]RankedCount, error) {
 	return ranked(ctx, db, `
 select
 	coalesce(
@@ -175,16 +176,17 @@ left join users u on u.id = m.user_id and u.workspace_id = m.workspace_id
 where m.ts not like 'draft:%'
   and instr(m.ts, '.') > 0
   and cast(substr(m.ts, 1, instr(m.ts, '.') - 1) as integer) >= ?
+  and m.ts <= ?
   and m.workspace_id = ?
   and m.channel_id = ?
 group by m.workspace_id, m.user_id
 order by total desc, name asc
 limit ?
-`, since.Unix(), workspaceID, channelID, limit)
+`, since.Unix(), slackTSBoundary(until), workspaceID, channelID, limit)
 }
 
 // topMentionsForChannel returns the top mention targets for a single channel.
-func topMentionsForChannel(ctx context.Context, db *sql.DB, since time.Time, workspaceID, channelID string, limit int) ([]RankedCount, error) {
+func topMentionsForChannel(ctx context.Context, db *sql.DB, since time.Time, until time.Time, workspaceID, channelID string, limit int) ([]RankedCount, error) {
 	return ranked(ctx, db, `
 select
 	coalesce(
@@ -203,16 +205,17 @@ left join channels c on c.id = mm.target_id and c.workspace_id = m.workspace_id
 where m.ts not like 'draft:%'
   and instr(m.ts, '.') > 0
   and cast(substr(m.ts, 1, instr(m.ts, '.') - 1) as integer) >= ?
+  and m.ts <= ?
   and m.workspace_id = ?
   and m.channel_id = ?
 group by mm.target_id
 order by total desc, name asc
 limit ?
-`, since.Unix(), workspaceID, channelID, limit)
+`, since.Unix(), slackTSBoundary(until), workspaceID, channelID, limit)
 }
 
 // digestTotals sums messages/threads/channels/authors across the whole window.
-func digestTotals(ctx context.Context, db *sql.DB, since time.Time, workspaceID, channel string) (DigestTotals, error) {
+func digestTotals(ctx context.Context, db *sql.DB, since time.Time, until time.Time, workspaceID, channel string) (DigestTotals, error) {
 	query := &strings.Builder{}
 	query.WriteString(`
 select
@@ -225,8 +228,9 @@ left join channels c on c.id = m.channel_id and c.workspace_id = m.workspace_id
 where m.ts not like 'draft:%'
   and instr(m.ts, '.') > 0
   and cast(substr(m.ts, 1, instr(m.ts, '.') - 1) as integer) >= ?
+  and m.ts <= ?
 `)
-	args := []any{since.Unix()}
+	args := []any{since.Unix(), slackTSBoundary(until)}
 	if workspaceID != "" {
 		query.WriteString("  and m.workspace_id = ?\n")
 		args = append(args, workspaceID)
@@ -241,6 +245,11 @@ where m.ts not like 'draft:%'
 		return DigestTotals{}, fmt.Errorf("digest totals: %w", err)
 	}
 	return totals, nil
+}
+
+func slackTSBoundary(t time.Time) string {
+	t = t.UTC()
+	return fmt.Sprintf("%d.%06d", t.Unix(), t.Nanosecond()/1000)
 }
 
 // humanDuration renders a window duration as a compact human string (e.g. "7d", "36h").

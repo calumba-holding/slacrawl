@@ -44,6 +44,11 @@ func TestBuildDigest(t *testing.T) {
 	// C2: 1 message from Bob in window
 	addMsg(t, ctx, st, "C2", tsEpoch(earlier.Add(3*time.Hour), 500), "T1", "U2", "", "ops only")
 
+	// Future message in the same second as Now - should be excluded from the advertised window
+	addMsgWithMentions(t, ctx, st, "C1", tsEpoch(now, 500000), "T1", "U2", "", "future ping <@U2>", []store.Mention{
+		{Type: "user", TargetID: "U2", DisplayText: "Bob"},
+	})
+
 	// C3: old message (outside 7d window) - should not appear in digest
 	addMsg(t, ctx, st, "C3", tsEpoch(stale, 600), "T1", "U1", "", "old news")
 
