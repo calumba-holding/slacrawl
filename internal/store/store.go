@@ -602,7 +602,8 @@ func (s *Store) MarkMessageDeleted(ctx context.Context, message Message) error {
 	if err != nil {
 		return err
 	}
-	if rows == 0 {
+	switch rows {
+	case 0:
 		if err := qtx.UpsertMessage(ctx, storedb.UpsertMessageParams{
 			ChannelID:      message.ChannelID,
 			Ts:             message.TS,
@@ -629,6 +630,24 @@ func (s *Store) MarkMessageDeleted(ctx context.Context, message Message) error {
 			return err
 		}
 		if err := qtx.InsertMessageFTS(ctx, storedb.InsertMessageFTSParams{MessageKey: key, Content: messageSearchContent(message)}); err != nil {
+			return err
+		}
+	default:
+		normalizedText, err := qtx.GetMessageSearchText(ctx, storedb.GetMessageSearchTextParams{ChannelID: message.ChannelID, Ts: message.TS})
+		if err != nil {
+			return err
+		}
+		filesForSearch, err := existingFilesForSearch(ctx, tx, message.ChannelID, message.TS)
+		if err != nil {
+			return err
+		}
+		searchMessage := message
+		searchMessage.NormalizedText = normalizedText
+		searchMessage.Files = filesForSearch
+		if err := qtx.DeleteMessageFTS(ctx, key); err != nil {
+			return err
+		}
+		if err := qtx.InsertMessageFTS(ctx, storedb.InsertMessageFTSParams{MessageKey: key, Content: messageSearchContent(searchMessage)}); err != nil {
 			return err
 		}
 	}

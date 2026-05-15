@@ -153,7 +153,18 @@ values (?, ?, ?, ?, ?, ?);
 
 -- name: MarkMessageDeleted :execrows
 update messages
-set deleted_ts = ?, updated_at = ?
+set deleted_ts = ?,
+    updated_at = ?,
+    normalized_text = case
+      when instr(normalized_text, '[deleted]') > 0 then normalized_text
+      when trim(normalized_text) = '' then '[deleted]'
+      else trim(normalized_text || ' [deleted]')
+    end
+where channel_id = ? and ts = ?;
+
+-- name: GetMessageSearchText :one
+select normalized_text
+from messages
 where channel_id = ? and ts = ?;
 
 -- name: SetSyncState :exec

@@ -128,6 +128,24 @@ func (q *Queries) DeleteMessageMentions(ctx context.Context, arg DeleteMessageMe
 	return err
 }
 
+const getMessageSearchText = `-- name: GetMessageSearchText :one
+select normalized_text
+from messages
+where channel_id = ? and ts = ?
+`
+
+type GetMessageSearchTextParams struct {
+	ChannelID string `json:"channel_id"`
+	Ts        string `json:"ts"`
+}
+
+func (q *Queries) GetMessageSearchText(ctx context.Context, arg GetMessageSearchTextParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, getMessageSearchText, arg.ChannelID, arg.Ts)
+	var normalized_text string
+	err := row.Scan(&normalized_text)
+	return normalized_text, err
+}
+
 const getSyncState = `-- name: GetSyncState :one
 select value from sync_state
 where source_name = ? and entity_type = ? and entity_id = ?
@@ -1034,7 +1052,13 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 
 const markMessageDeleted = `-- name: MarkMessageDeleted :execrows
 update messages
-set deleted_ts = ?, updated_at = ?
+set deleted_ts = ?,
+    updated_at = ?,
+    normalized_text = case
+      when instr(normalized_text, '[deleted]') > 0 then normalized_text
+      when trim(normalized_text) = '' then '[deleted]'
+      else trim(normalized_text || ' [deleted]')
+    end
 where channel_id = ? and ts = ?
 `
 
