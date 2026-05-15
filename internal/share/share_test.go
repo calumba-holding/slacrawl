@@ -116,6 +116,32 @@ func TestImportRejectsEscapedManifestTablePath(t *testing.T) {
 	assertArchiveStillPresent(t, ctx, reader)
 }
 
+func TestImportRejectsSymlinkedManifestTableDir(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	source := seedStore(t, filepath.Join(dir, "source.db"))
+	defer func() { require.NoError(t, source.Close()) }()
+	opts := Options{RepoPath: filepath.Join(dir, "share"), Branch: "main"}
+	_, err := Export(ctx, source, opts)
+	require.NoError(t, err)
+
+	outside := filepath.Join(dir, "outside-messages")
+	require.NoError(t, os.MkdirAll(outside, 0o750))
+	tableDir := filepath.Join(opts.RepoPath, "tables", "messages")
+	require.NoError(t, os.RemoveAll(tableDir))
+	if err := os.Symlink(outside, tableDir); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	reader := seedStore(t, filepath.Join(dir, "reader.db"))
+	defer func() { require.NoError(t, reader.Close()) }()
+
+	_, err = Import(ctx, reader, opts)
+	require.ErrorContains(t, err, "path escapes share repo")
+	assertArchiveStillPresent(t, ctx, reader)
+}
+
 func TestPullPreservesLocalCommitsAheadOfOrigin(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

@@ -607,19 +607,22 @@ func resolveManifestTableFile(repoPath string, tableName string, rel string) (st
 	}
 	basePath := filepath.Join(repoPath, "tables", tableName)
 	filePath := filepath.Join(repoPath, cleanRel)
+	repoEval, err := filepath.EvalSymlinks(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve share repo: %w", err)
+	}
 	baseEval, err := filepath.EvalSymlinks(basePath)
 	if err != nil {
 		return "", fmt.Errorf("resolve table dir: %w", err)
+	}
+	if !pathWithin(repoEval, baseEval) {
+		return "", errors.New("path escapes share repo")
 	}
 	fileEval, err := filepath.EvalSymlinks(filePath)
 	if err != nil {
 		return "", fmt.Errorf("resolve file: %w", err)
 	}
-	relative, err := filepath.Rel(baseEval, fileEval)
-	if err != nil {
-		return "", err
-	}
-	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+	if !pathWithin(baseEval, fileEval) {
 		return "", errors.New("path escapes table directory")
 	}
 	info, err := os.Stat(fileEval)
@@ -630,6 +633,14 @@ func resolveManifestTableFile(repoPath string, tableName string, rel string) (st
 		return "", errors.New("path is a directory")
 	}
 	return fileEval, nil
+}
+
+func pathWithin(root string, target string) bool {
+	relative, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
 }
 
 func tableColumns(ctx context.Context, db *sql.DB, table string) ([]string, error) {
