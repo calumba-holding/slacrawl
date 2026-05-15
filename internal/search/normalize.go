@@ -14,7 +14,7 @@ import (
 var (
 	userMentionRe    = regexp.MustCompile(`<@([A-Z0-9]+)(?:\|([^>]+))?>`)
 	channelMentionRe = regexp.MustCompile(`<#([A-Z0-9]+)(?:\|([^>]+))?>`)
-	linkRe           = regexp.MustCompile(`<([^>|]+)\|?([^>]*)>`)
+	slackTokenRe     = regexp.MustCompile(`<([^>|]+)(?:\|([^>]*))?>`)
 )
 
 type Mention struct {
@@ -24,49 +24,21 @@ type Mention struct {
 }
 
 func NormalizeMessage(msg slack.Message) string {
-	text := sanitizeText(msg.Text)
-	text = userMentionRe.ReplaceAllStringFunc(text, func(match string) string {
-		parts := userMentionRe.FindStringSubmatch(match)
-		if parts[2] != "" {
-			return "@" + html.UnescapeString(parts[2])
-		}
-		return "@" + html.UnescapeString(parts[1])
-	})
-	text = channelMentionRe.ReplaceAllStringFunc(text, func(match string) string {
-		parts := channelMentionRe.FindStringSubmatch(match)
-		if parts[2] != "" {
-			return "#" + html.UnescapeString(parts[2])
-		}
-		return "#" + html.UnescapeString(parts[1])
-	})
-	text = linkRe.ReplaceAllStringFunc(text, func(match string) string {
-		parts := linkRe.FindStringSubmatch(match)
-		if len(parts) < 3 {
-			return match
-		}
-		if strings.HasPrefix(parts[1], "@") || strings.HasPrefix(parts[1], "#") {
-			return match
-		}
-		if parts[2] != "" {
-			return html.UnescapeString(parts[2]) + " " + html.UnescapeString(parts[1])
-		}
-		return html.UnescapeString(parts[1])
-	})
-	text = sanitizeText(html.UnescapeString(text))
+	text := normalizeMessageText(msg.Text)
 
 	parts := []string{strings.TrimSpace(text)}
 	for _, file := range msg.Files {
 		if file.Title != "" {
-			parts = append(parts, sanitizeDisplayText(file.Title))
+			parts = append(parts, sanitizeText(file.Title))
 		}
 		if file.Name != "" && file.Name != file.Title {
-			parts = append(parts, sanitizeDisplayText(file.Name))
+			parts = append(parts, sanitizeText(file.Name))
 		}
 		if file.PlainText != "" {
-			parts = append(parts, sanitizeDisplayText(file.PlainText))
+			parts = append(parts, sanitizeText(file.PlainText))
 		}
 		if file.PreviewPlainText != "" && file.PreviewPlainText != file.PlainText {
-			parts = append(parts, sanitizeDisplayText(file.PreviewPlainText))
+			parts = append(parts, sanitizeText(file.PreviewPlainText))
 		}
 	}
 	if msg.Edited != nil {
@@ -79,6 +51,50 @@ func NormalizeMessage(msg slack.Message) string {
 		parts = append(parts, "[thread-reply]")
 	}
 	return strings.TrimSpace(strings.Join(filterEmpty(parts), " "))
+}
+
+func normalizeMessageText(raw string) string {
+	text := sanitizeText(raw)
+	if text == "" {
+		return ""
+	}
+	matches := slackTokenRe.FindAllStringSubmatchIndex(text, -1)
+	if len(matches) == 0 {
+		return sanitizeText(html.UnescapeString(text))
+	}
+	var b strings.Builder
+	last := 0
+	for _, match := range matches {
+		b.WriteString(html.UnescapeString(text[last:match[0]]))
+		target := text[match[2]:match[3]]
+		label := ""
+		if match[4] >= 0 {
+			label = text[match[4]:match[5]]
+		}
+		b.WriteString(renderSlackToken(target, label))
+		last = match[1]
+	}
+	b.WriteString(html.UnescapeString(text[last:]))
+	return sanitizeText(b.String())
+}
+
+func renderSlackToken(target string, label string) string {
+	switch {
+	case strings.HasPrefix(target, "@"):
+		if label != "" {
+			return "@" + html.UnescapeString(label)
+		}
+		return "@" + html.UnescapeString(strings.TrimPrefix(target, "@"))
+	case strings.HasPrefix(target, "#"):
+		if label != "" {
+			return "#" + html.UnescapeString(label)
+		}
+		return "#" + html.UnescapeString(strings.TrimPrefix(target, "#"))
+	case label != "":
+		return html.UnescapeString(label) + " " + html.UnescapeString(target)
+	default:
+		return html.UnescapeString(target)
+	}
 }
 
 func ExtractMentions(text string) []Mention {

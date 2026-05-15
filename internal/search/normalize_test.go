@@ -41,15 +41,19 @@ func TestNormalizeMessageSanitizesMalformedUnicodeAndWhitespace(t *testing.T) {
 
 func TestNormalizeMessageUnescapesSlackEntities(t *testing.T) {
 	msg := slack.Message{}
-	msg.Text = "AT&amp;T &lt;tag&gt; <https://example.com?q=AT&amp;T|docs &amp; faq> <https://example.com/math|1 &gt; 0>"
+	msg.Text = "AT&amp;T &lt;tag&gt; <https://example.com?q=AT&amp;T|docs &amp; faq> <https://example.com/math|1 &gt; 0> <https://example.com/literal|docs &amp;lt;tag&amp;gt;>"
+	msg.Files = []slack.File{{Title: "AT&amp;T.md", PlainText: "&lt;div&gt;"}}
 
 	normalized := NormalizeMessage(msg)
 	require.Contains(t, normalized, "AT&T")
 	require.Contains(t, normalized, "tag")
 	require.Contains(t, normalized, "docs & faq https://example.com?q=AT&T")
 	require.Contains(t, normalized, "1 > 0 https://example.com/math")
-	require.NotContains(t, normalized, "&amp;")
-	require.NotContains(t, normalized, "&lt;")
+	require.Contains(t, normalized, "docs &lt;tag&gt; https://example.com/literal")
+	require.Contains(t, normalized, "AT&amp;T.md")
+	require.Contains(t, normalized, "&lt;div&gt;")
+	require.NotContains(t, normalized, "AT&amp;T &lt;tag&gt;")
+	require.NotContains(t, normalized, "docs &amp; faq")
 }
 
 func TestExtractMentionsSanitizesNoisyText(t *testing.T) {
