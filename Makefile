@@ -30,4 +30,6 @@ completion-zsh:
 	go run ./cmd/slacrawl completion zsh > $(COMPLETION_DIR)/_slacrawl
 
 clean:
-	rm -rf bin dist
+	rm -rf -- "$(BINARY)" "$(COMPLETION_DIR)"
+	[ "$(BINARY)" != "bin/slacrawl" ] || rm -rf bin
+	[ "$(COMPLETION_DIR)" != "dist/completions" ] || rm -rf dist
