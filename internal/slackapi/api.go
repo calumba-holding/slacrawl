@@ -485,10 +485,10 @@ func messageFromEvent(event *slackevents.MessageEvent) slack.Message {
 		if msg.Text == "" {
 			msg.Text = event.PreviousMessage.Text
 		}
-		if msg.Timestamp == "" {
+		if msg.Timestamp == "" || event.SubType == "message_deleted" {
 			msg.Timestamp = event.PreviousMessage.Timestamp
 		}
-		if msg.ThreadTimestamp == "" {
+		if msg.ThreadTimestamp == "" || event.SubType == "message_deleted" {
 			msg.ThreadTimestamp = event.PreviousMessage.ThreadTimestamp
 		}
 		if msg.User == "" {

@@ -826,8 +826,52 @@ func TestMessageFromEventPreservesDeleteAndThreadFields(t *testing.T) {
 	ev, ok := event.InnerEvent.Data.(*slackevents.MessageEvent)
 	require.True(t, ok)
 	msg := messageFromEvent(ev)
+	require.Equal(t, "1710000000.000100", msg.Timestamp)
 	require.Equal(t, "1710000000.000100", msg.DeletedTimestamp)
 	require.Equal(t, "1710000000.000100", msg.ThreadTimestamp)
+}
+
+func TestHandleEventsAPIEventMarksOriginalMessageDeleted(t *testing.T) {
+	st := mustStore(t)
+	defer func() { require.NoError(t, st.Close()) }()
+	client := New(config.Tokens{Bot: "xoxb-test"})
+	client.now = func() time.Time { return time.Date(2026, 3, 8, 1, 2, 3, 0, time.UTC) }
+	ctx := context.Background()
+	require.NoError(t, st.UpsertMessage(ctx, store.Message{
+		ChannelID:      "C123",
+		TS:             "1710000000.000100",
+		WorkspaceID:    "T123",
+		UserID:         "U123",
+		Text:           "gone",
+		NormalizedText: "gone",
+		SourceRank:     2,
+		SourceName:     SourceBot,
+		RawJSON:        "{}",
+		UpdatedAt:      client.now(),
+	}, nil))
+	raw := []byte(`{
+	  "token":"ignored",
+	  "team_id":"T123",
+	  "api_app_id":"A123",
+	  "type":"event_callback",
+	  "event":{
+	    "type":"message",
+	    "subtype":"message_deleted",
+	    "channel":"C123",
+	    "deleted_ts":"1710000000.000100",
+	    "previous_message":{"text":"gone","ts":"1710000000.000100","thread_ts":"1710000000.000100","user":"U123"},
+	    "event_ts":"1710000002.000200"
+	  }
+	}`)
+	event, err := slackevents.ParseEvent(raw, slackevents.OptionNoVerifyToken())
+	require.NoError(t, err)
+	require.NoError(t, client.HandleEventsAPIEvent(ctx, st, "T123", event))
+
+	rows, err := st.QueryReadOnly(ctx, "select ts, deleted_ts from messages where channel_id = 'C123' order by ts")
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "1710000000.000100", rows[0]["ts"])
+	require.Equal(t, "1710000000.000100", rows[0]["deleted_ts"])
 }
 
 func TestHandleEventsAPIEventIgnoresUnknown(t *testing.T) {
