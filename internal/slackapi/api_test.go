@@ -842,12 +842,23 @@ func TestHandleEventsAPIEventMarksOriginalMessageDeleted(t *testing.T) {
 		TS:             "1710000000.000100",
 		WorkspaceID:    "T123",
 		UserID:         "U123",
+		ClientMsgID:    "client-1",
 		Text:           "gone",
 		NormalizedText: "gone",
+		ReplyCount:     2,
+		LatestReply:    "1710000001.000200",
 		SourceRank:     2,
 		SourceName:     SourceBot,
 		RawJSON:        "{}",
 		UpdatedAt:      client.now(),
+		Files: []store.MessageFile{{
+			FileID:        "F123",
+			Name:          "incident.txt",
+			Title:         "Incident",
+			PlainText:     "archived file text",
+			MediaPath:     "files/ab/hash-incident.txt",
+			ContentSHA256: "hash",
+		}},
 	}, nil))
 	raw := []byte(`{
 	  "token":"ignored",
@@ -867,11 +878,18 @@ func TestHandleEventsAPIEventMarksOriginalMessageDeleted(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleEventsAPIEvent(ctx, st, "T123", event))
 
-	rows, err := st.QueryReadOnly(ctx, "select ts, deleted_ts from messages where channel_id = 'C123' order by ts")
+	rows, err := st.QueryReadOnly(ctx, "select ts, deleted_ts, client_msg_id, reply_count, latest_reply from messages where channel_id = 'C123' order by ts")
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, "1710000000.000100", rows[0]["ts"])
 	require.Equal(t, "1710000000.000100", rows[0]["deleted_ts"])
+	require.Equal(t, "client-1", rows[0]["client_msg_id"])
+	require.Equal(t, int64(2), rows[0]["reply_count"])
+	require.Equal(t, "1710000001.000200", rows[0]["latest_reply"])
+	files, err := st.Files(ctx, store.FileListOptions{FileID: "F123"})
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	require.Equal(t, "files/ab/hash-incident.txt", files[0].MediaPath)
 }
 
 func TestHandleEventsAPIEventIgnoresUnknown(t *testing.T) {

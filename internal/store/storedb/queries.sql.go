@@ -1032,6 +1032,32 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 	return items, nil
 }
 
+const markMessageDeleted = `-- name: MarkMessageDeleted :execrows
+update messages
+set deleted_ts = ?, updated_at = ?
+where channel_id = ? and ts = ?
+`
+
+type MarkMessageDeletedParams struct {
+	DeletedTs sql.NullString `json:"deleted_ts"`
+	UpdatedAt string         `json:"updated_at"`
+	ChannelID string         `json:"channel_id"`
+	Ts        string         `json:"ts"`
+}
+
+func (q *Queries) MarkMessageDeleted(ctx context.Context, arg MarkMessageDeletedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markMessageDeleted,
+		arg.DeletedTs,
+		arg.UpdatedAt,
+		arg.ChannelID,
+		arg.Ts,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const renameChannel = `-- name: RenameChannel :exec
 update channels
 set name = ?, updated_at = ?

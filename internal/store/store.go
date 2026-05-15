@@ -583,6 +583,68 @@ func (s *Store) UpsertMessage(ctx context.Context, message Message, mentions []M
 	return tx.Commit()
 }
 
+func (s *Store) MarkMessageDeleted(ctx context.Context, message Message) error {
+	key := messageKey(message.ChannelID, message.TS)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	qtx := s.q.WithTx(tx)
+
+	updatedAt := formatDBTime(message.UpdatedAt)
+	rows, err := qtx.MarkMessageDeleted(ctx, storedb.MarkMessageDeletedParams{
+		DeletedTs: dbText(message.DeletedTS),
+		UpdatedAt: updatedAt,
+		ChannelID: message.ChannelID,
+		Ts:        message.TS,
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		if err := qtx.UpsertMessage(ctx, storedb.UpsertMessageParams{
+			ChannelID:      message.ChannelID,
+			Ts:             message.TS,
+			WorkspaceID:    message.WorkspaceID,
+			UserID:         dbText(message.UserID),
+			Subtype:        dbText(message.Subtype),
+			ClientMsgID:    dbText(message.ClientMsgID),
+			ThreadTs:       dbText(message.ThreadTS),
+			ParentUserID:   dbText(message.ParentUserID),
+			Text:           message.Text,
+			NormalizedText: message.NormalizedText,
+			ReplyCount:     int64(message.ReplyCount),
+			LatestReply:    dbText(message.LatestReply),
+			EditedTs:       dbText(message.EditedTS),
+			DeletedTs:      dbText(message.DeletedTS),
+			SourceRank:     int64(message.SourceRank),
+			SourceName:     message.SourceName,
+			RawJson:        message.RawJSON,
+			UpdatedAt:      updatedAt,
+		}); err != nil {
+			return err
+		}
+		if err := qtx.DeleteMessageFTS(ctx, key); err != nil {
+			return err
+		}
+		if err := qtx.InsertMessageFTS(ctx, storedb.InsertMessageFTSParams{MessageKey: key, Content: messageSearchContent(message)}); err != nil {
+			return err
+		}
+	}
+	if err := qtx.InsertMessageEvent(ctx, storedb.InsertMessageEventParams{
+		ChannelID:   message.ChannelID,
+		Ts:          message.TS,
+		EventType:   eventType(message),
+		SourceName:  message.SourceName,
+		PayloadJson: message.RawJSON,
+		CreatedAt:   updatedAt,
+	}); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func existingFileMedia(ctx context.Context, qtx *storedb.Queries, channelID, ts string) (map[string]MessageFile, error) {
 	rows, err := qtx.ListExistingFileMedia(ctx, storedb.ListExistingFileMediaParams{ChannelID: channelID, Ts: ts})
 	if err != nil {

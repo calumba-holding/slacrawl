@@ -151,6 +151,11 @@ insert into message_fts (message_key, content) values (?, ?);
 insert into message_events (channel_id, ts, event_type, source_name, payload_json, created_at)
 values (?, ?, ?, ?, ?, ?);
 
+-- name: MarkMessageDeleted :execrows
+update messages
+set deleted_ts = ?, updated_at = ?
+where channel_id = ? and ts = ?;
+
 -- name: SetSyncState :exec
 insert into sync_state (source_name, entity_type, entity_id, value, updated_at)
 values (?, ?, ?, ?, ?)
