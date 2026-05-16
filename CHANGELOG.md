@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Bump routine Go module and GitHub Actions dependencies.
+- Bump routine Go module and GitHub Actions dependencies, including Go 1.26.3 for standard-library vulnerability fixes.
 
 - Clarify in the public docs that future Slack file-blob backup must store Git-share media as gzip-compressed files, restore raw local cache files on import, and keep legacy raw-media import compatibility.
 
