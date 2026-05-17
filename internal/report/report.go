@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 type Options struct {

@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
-	"github.com/vincentkoc/slacrawl/internal/config"
-	"github.com/vincentkoc/slacrawl/internal/slackapi"
-	"github.com/vincentkoc/slacrawl/internal/slackdesktop"
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/config"
+	"github.com/openclaw/slacrawl/internal/slackapi"
+	"github.com/openclaw/slacrawl/internal/slackdesktop"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 type Source string
@@ -34,13 +35,16 @@ func ParseSource(value string) (Source, error) {
 }
 
 type Options struct {
-	Source      Source
-	WorkspaceID string
-	Channels    []string
-	Since       string
-	Full        bool
-	LatestOnly  bool
-	Concurrency int
+	Source          Source
+	WorkspaceID     string
+	Channels        []string
+	ExcludeChannels []string
+	Since           string
+	Full            bool
+	LatestOnly      bool
+	Concurrency     int
+	AutoJoin        *bool
+	Logger          *slog.Logger
 }
 
 type Summary struct {
@@ -54,28 +58,32 @@ func Run(ctx context.Context, cfg config.Config, st *store.Store, opts Options) 
 func RunWithTokens(ctx context.Context, cfg config.Config, st *store.Store, opts Options, tokens config.Tokens) (Summary, error) {
 	summary := Summary{}
 	includeDMs := cfg.IncludeDMsResolved(tokens.User != "")
-	apiClient := slackapi.New(tokens).WithIncludeDMs(includeDMs)
+	apiClient := slackapi.New(tokens).WithIncludeDMs(includeDMs).WithLogger(opts.Logger)
 
 	switch opts.Source {
 	case SourceAPI:
 		return summary, apiClient.Sync(ctx, st, slackapi.SyncOptions{
-			WorkspaceID: opts.WorkspaceID,
-			Channels:    opts.Channels,
-			Since:       opts.Since,
-			Full:        opts.Full,
-			LatestOnly:  opts.LatestOnly,
-			Concurrency: opts.Concurrency,
+			WorkspaceID:     opts.WorkspaceID,
+			Channels:        opts.Channels,
+			ExcludeChannels: opts.ExcludeChannels,
+			Since:           opts.Since,
+			Full:            opts.Full,
+			LatestOnly:      opts.LatestOnly,
+			Concurrency:     opts.Concurrency,
+			AutoJoin:        opts.AutoJoin,
 		})
 	case SourceDesktop:
 		return syncDesktop(ctx, cfg, st)
 	case SourceAll:
 		if err := apiClient.Sync(ctx, st, slackapi.SyncOptions{
-			WorkspaceID: opts.WorkspaceID,
-			Channels:    opts.Channels,
-			Since:       opts.Since,
-			Full:        opts.Full,
-			LatestOnly:  opts.LatestOnly,
-			Concurrency: opts.Concurrency,
+			WorkspaceID:     opts.WorkspaceID,
+			Channels:        opts.Channels,
+			ExcludeChannels: opts.ExcludeChannels,
+			Since:           opts.Since,
+			Full:            opts.Full,
+			LatestOnly:      opts.LatestOnly,
+			Concurrency:     opts.Concurrency,
+			AutoJoin:        opts.AutoJoin,
 		}); err != nil {
 			return summary, err
 		}

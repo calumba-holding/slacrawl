@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -18,10 +19,11 @@ import (
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
+	"github.com/vincentkoc/crawlkit/progress"
 
-	"github.com/vincentkoc/slacrawl/internal/config"
-	"github.com/vincentkoc/slacrawl/internal/search"
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/config"
+	"github.com/openclaw/slacrawl/internal/search"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 const (
@@ -44,12 +46,14 @@ type Diagnostics struct {
 }
 
 type SyncOptions struct {
-	WorkspaceID string
-	Channels    []string
-	Since       string
-	Full        bool
-	LatestOnly  bool
-	Concurrency int
+	WorkspaceID     string
+	Channels        []string
+	ExcludeChannels []string
+	Since           string
+	Full            bool
+	LatestOnly      bool
+	Concurrency     int
+	AutoJoin        *bool
 }
 
 type Client struct {
@@ -63,6 +67,7 @@ type Client struct {
 	sleep        func(context.Context, time.Duration) error
 	now          func() time.Time
 	socketModeFn func(*slack.Client) socketModeRunner
+	logger       *slog.Logger
 }
 
 func New(tokens config.Tokens) *Client {
@@ -114,6 +119,11 @@ func NewWithOptions(tokens config.Tokens, apiURL string, httpClient *http.Client
 
 func (c *Client) WithIncludeDMs(include bool) *Client {
 	c.includeDMs = include
+	return c
+}
+
+func (c *Client) WithLogger(logger *slog.Logger) *Client {
+	c.logger = logger
 	return c
 }
 
@@ -186,12 +196,16 @@ func (c *Client) Sync(ctx context.Context, st *store.Store, opts SyncOptions) er
 	for _, id := range opts.Channels {
 		allow[id] = struct{}{}
 	}
+	excluded := excludedChannelNames(opts.ExcludeChannels)
 	selectedChannels := make([]slack.Channel, 0, len(channels))
 	for _, channel := range channels {
 		if len(allow) > 0 {
 			if _, ok := allow[channel.ID]; !ok {
 				continue
 			}
+		}
+		if channelExcluded(channel, excluded) {
+			continue
 		}
 		selectedChannels = append(selectedChannels, channel)
 	}
@@ -231,6 +245,9 @@ func (c *Client) Sync(ctx context.Context, st *store.Store, opts SyncOptions) er
 					}
 				}
 				channel.Name = dmChannelName(channel, userByID)
+				if channelExcluded(channel, excluded) {
+					continue
+				}
 				selectedDMs = append(selectedDMs, channel)
 			}
 			if err := c.syncChannelsWithSource(ctx, st, workspaceID, selectedDMs, opts, now, userRepliesAvailable, channelSyncSource{
@@ -1044,9 +1061,42 @@ func (c *Client) syncChannels(ctx context.Context, st *store.Store, workspaceID 
 		token:         c.tokens.Bot,
 		sourceName:    SourceBot,
 		sourceRank:    2,
-		allowJoin:     true,
+		allowJoin:     syncAutoJoin(opts),
 		threadSkip:    threadSkip,
 	})
+}
+
+func syncAutoJoin(opts SyncOptions) bool {
+	return opts.AutoJoin == nil || *opts.AutoJoin
+}
+
+func excludedChannelNames(values []string) map[string]struct{} {
+	if len(values) == 0 {
+		return nil
+	}
+	excluded := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		name := normalizeChannelName(value)
+		if name != "" {
+			excluded[name] = struct{}{}
+		}
+	}
+	return excluded
+}
+
+func channelExcluded(channel slack.Channel, excluded map[string]struct{}) bool {
+	if len(excluded) == 0 {
+		return false
+	}
+	if _, ok := excluded[normalizeChannelName(channel.Name)]; ok {
+		return true
+	}
+	_, ok := excluded[normalizeChannelName(channel.ID)]
+	return ok
+}
+
+func normalizeChannelName(value string) string {
+	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "#"))
 }
 
 func (c *Client) syncChannelsWithSource(ctx context.Context, st *store.Store, workspaceID string, channels []slack.Channel, opts SyncOptions, now time.Time, userRepliesAvailable bool, source channelSyncSource) error {
@@ -1067,15 +1117,25 @@ func (c *Client) syncChannelsWithSource(ctx context.Context, st *store.Store, wo
 	if workerCount > len(channels) {
 		workerCount = len(channels)
 	}
+	tracker := progress.New(c.logger, progress.Options{
+		Name:  "sync",
+		Unit:  "channels",
+		Total: int64(len(channels)),
+		Attrs: []any{"workspace_id", workspaceID, "source", source.sourceName},
+	})
 	if workerCount == 1 {
 		for _, channel := range channels {
 			if err := st.UpsertChannel(ctx, toStoreChannel(workspaceID, channel, now)); err != nil {
+				tracker.Finish(err)
 				return err
 			}
 			if err := c.syncChannelMessagesWithSource(ctx, st, workspaceID, channel, oldestByChannel[channel.ID], now, userRepliesAvailable, source); err != nil {
+				tracker.Finish(err)
 				return err
 			}
+			tracker.Add(1, "channel_id", channel.ID, "channel_name", channel.Name)
 		}
+		tracker.Finish(nil)
 		return nil
 	}
 
@@ -1104,6 +1164,7 @@ func (c *Client) syncChannelsWithSource(ctx context.Context, st *store.Store, wo
 				cancel()
 				return
 			}
+			tracker.Add(1, "channel_id", channel.ID, "channel_name", channel.Name)
 		}
 	}
 	for i := 0; i < workerCount; i++ {
@@ -1117,11 +1178,14 @@ func (c *Client) syncChannelsWithSource(ctx context.Context, st *store.Store, wo
 			wg.Wait()
 			select {
 			case err := <-errCh:
+				tracker.Finish(err)
 				return err
 			default:
 				if ctx.Err() != nil && !errors.Is(ctx.Err(), context.Canceled) {
+					tracker.Finish(ctx.Err())
 					return ctx.Err()
 				}
+				tracker.Finish(nil)
 				return nil
 			}
 		case workCh <- channel:
@@ -1132,11 +1196,14 @@ func (c *Client) syncChannelsWithSource(ctx context.Context, st *store.Store, wo
 
 	select {
 	case err := <-errCh:
+		tracker.Finish(err)
 		return err
 	default:
 		if ctx.Err() != nil && !errors.Is(ctx.Err(), context.Canceled) {
+			tracker.Finish(ctx.Err())
 			return ctx.Err()
 		}
+		tracker.Finish(nil)
 		return nil
 	}
 }

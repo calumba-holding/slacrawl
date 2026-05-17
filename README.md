@@ -83,19 +83,19 @@ brew install slacrawl
 <details>
 <summary>Linux packages from GitHub Releases</summary>
 
-Download the package that matches your platform from the [latest release](https://github.com/vincentkoc/slacrawl/releases/latest).
+Download the package that matches your platform from the [latest release](https://github.com/openclaw/slacrawl/releases/latest).
 
 Debian/Ubuntu:
 
 ```bash
-curl -LO https://github.com/vincentkoc/slacrawl/releases/latest/download/slacrawl_0.6.0_amd64.deb
+curl -LO https://github.com/openclaw/slacrawl/releases/latest/download/slacrawl_0.6.0_amd64.deb
 sudo dpkg -i slacrawl_0.6.0_amd64.deb
 ```
 
 RHEL/Fedora:
 
 ```bash
-curl -LO https://github.com/vincentkoc/slacrawl/releases/latest/download/slacrawl-0.6.0-1.x86_64.rpm
+curl -LO https://github.com/openclaw/slacrawl/releases/latest/download/slacrawl-0.6.0-1.x86_64.rpm
 sudo rpm -i slacrawl-0.6.0-1.x86_64.rpm
 ```
 
@@ -105,7 +105,7 @@ sudo rpm -i slacrawl-0.6.0-1.x86_64.rpm
 <summary>Build from source</summary>
 
 ```bash
-git clone https://github.com/vincentkoc/slacrawl.git
+git clone https://github.com/openclaw/slacrawl.git
 cd slacrawl
 go build -o bin/slacrawl ./cmd/slacrawl
 ./bin/slacrawl --help
@@ -130,7 +130,7 @@ The image stores config, SQLite data, cache, and Git snapshot state under `/data
 <summary>Run without building a binary</summary>
 
 ```bash
-git clone https://github.com/vincentkoc/slacrawl.git
+git clone https://github.com/openclaw/slacrawl.git
 cd slacrawl
 go run ./cmd/slacrawl --help
 ```

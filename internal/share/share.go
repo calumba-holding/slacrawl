@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vincentkoc/slacrawl/internal/media"
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/media"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 const (

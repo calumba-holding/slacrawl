@@ -1,8 +1,10 @@
 package slackapi
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,8 +19,8 @@ import (
 	"github.com/slack-go/slack/socketmode"
 	"github.com/stretchr/testify/require"
 
-	"github.com/vincentkoc/slacrawl/internal/config"
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/config"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 func TestSyncHandlesRateLimitAndThreadCoverage(t *testing.T) {
@@ -29,6 +31,8 @@ func TestSyncHandlesRateLimitAndThreadCoverage(t *testing.T) {
 		Bot:  "xoxb-test",
 		User: "xoxp-test",
 	}, server.URL()+"/", server.Client())
+	var progressLogs bytes.Buffer
+	client.WithLogger(testProgressLogger(&progressLogs))
 	client.sleep = func(context.Context, time.Duration) error { return nil }
 	client.now = func() time.Time { return time.Date(2026, 3, 8, 1, 2, 3, 0, time.UTC) }
 
@@ -54,6 +58,9 @@ func TestSyncHandlesRateLimitAndThreadCoverage(t *testing.T) {
 		require.Equal(t, "C123", row.ChannelID)
 	}
 	require.Equal(t, "message_replied", rows[0].Subtype)
+	require.Contains(t, progressLogs.String(), `msg="sync progress"`)
+	require.Contains(t, progressLogs.String(), `completion=100.0%`)
+	require.Contains(t, progressLogs.String(), `source=api-bot`)
 }
 
 func TestSyncIndexesRawHistoryBlockPayload(t *testing.T) {
@@ -399,6 +406,30 @@ func TestSyncJoinsPublicChannelBeforeRetryingHistory(t *testing.T) {
 	joinState, err := st.GetSyncState(context.Background(), SourceBot, "channel_join", "C111")
 	require.NoError(t, err)
 	require.Equal(t, "joined", joinState)
+}
+
+func TestSyncSkipsJoinWhenAutoJoinDisabled(t *testing.T) {
+	server := newJoinRetrySlackServer(t)
+	defer server.Close()
+
+	client := NewWithOptions(config.Tokens{
+		Bot: "xoxb-test",
+	}, server.URL()+"/", server.Client())
+	client.sleep = func(context.Context, time.Duration) error { return nil }
+
+	st := mustStore(t)
+	defer st.Close()
+
+	err := client.Sync(context.Background(), st, SyncOptions{AutoJoin: testBoolPtr(false)})
+	require.NoError(t, err)
+
+	rows, err := st.Messages(context.Background(), "", "C111", "", 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 0, "should not have joined or synced the channel")
+}
+
+func testBoolPtr(value bool) *bool {
+	return &value
 }
 
 func TestSyncDefaultsToIncrementalHistoryWhenNotFull(t *testing.T) {
@@ -1336,4 +1367,76 @@ func TestChannelSyncPlanLatestOnlySkipsUnsyncedChannels(t *testing.T) {
 	require.Equal(t, "C123", channels[0].ID)
 	require.Contains(t, oldestByChannel, "C123")
 	require.NotContains(t, oldestByChannel, "C999")
+}
+
+func TestSyncSkipsExcludedChannels(t *testing.T) {
+	server := newExcludeChannelSlackServer(t)
+	defer server.Close()
+
+	client := NewWithOptions(config.Tokens{
+		Bot: "xoxb-test",
+	}, server.URL()+"/", server.Client())
+	client.sleep = func(context.Context, time.Duration) error { return nil }
+
+	st := mustStore(t)
+	defer st.Close()
+
+	err := client.Sync(context.Background(), st, SyncOptions{ExcludeChannels: []string{" ops-alerts ", "#GENERAL"}})
+	require.NoError(t, err)
+
+	// ops-alerts and general are excluded; only #news should be synced
+	opsRows, err := st.Messages(context.Background(), "", "C111", "", 10)
+	require.NoError(t, err)
+	require.Len(t, opsRows, 0, "ops-alerts should be excluded")
+
+	generalRows, err := st.Messages(context.Background(), "", "C222", "", 10)
+	require.NoError(t, err)
+	require.Len(t, generalRows, 0, "general should be excluded (case-insensitive)")
+
+	newsRows, err := st.Messages(context.Background(), "", "C333", "", 10)
+	require.NoError(t, err)
+	require.Len(t, newsRows, 1, "news should be synced")
+	require.Equal(t, "news message", newsRows[0].Text)
+}
+
+func newExcludeChannelSlackServer(t *testing.T) *mockSlackServer {
+	t.Helper()
+	mock := &mockSlackServer{counts: map[string]int{}, lastOld: map[string]string{}}
+	mock.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth.test":
+			_, _ = w.Write([]byte(`{"ok":true,"team":"Test Team","team_id":"T123","user":"bot","user_id":"Ubot","bot_id":"B123"}`))
+		case "/conversations.list":
+			_, _ = w.Write([]byte(`{"ok":true,"channels":[
+				{"id":"C111","name":"ops-alerts","is_channel":true,"is_private":false,"is_archived":false,"is_shared":false,"is_general":false,"topic":{"value":""},"purpose":{"value":""}},
+				{"id":"C222","name":"general","is_channel":true,"is_private":false,"is_archived":false,"is_shared":false,"is_general":true,"topic":{"value":""},"purpose":{"value":""}},
+				{"id":"C333","name":"news","is_channel":true,"is_private":false,"is_archived":false,"is_shared":false,"is_general":false,"topic":{"value":""},"purpose":{"value":""}}
+			],"response_metadata":{"next_cursor":""}}`))
+		case "/conversations.history":
+			values := mustFormValues(r)
+			switch values.Get("channel") {
+			case "C333":
+				_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","user":"U123","text":"news message","ts":"1710000000.000100"}],"response_metadata":{"next_cursor":""}}`))
+			default:
+				_, _ = w.Write([]byte(`{"ok":true,"messages":[],"response_metadata":{"next_cursor":""}}`))
+			}
+		case "/users.list":
+			_, _ = w.Write([]byte(`{"ok":true,"members":[],"response_metadata":{"next_cursor":""}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	return mock
+}
+
+func testProgressLogger(out *bytes.Buffer) *slog.Logger {
+	return slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{
+		ReplaceAttr: func(_ []string, attr slog.Attr) slog.Attr {
+			if attr.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return attr
+		},
+	}))
 }

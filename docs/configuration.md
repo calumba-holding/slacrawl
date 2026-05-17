@@ -2,6 +2,11 @@
 
 `slacrawl` is configured with TOML at `~/.slacrawl/config.toml` by default.
 
+Config path resolution, runtime directories, status payloads, and token
+diagnostic formatting are normalized through `crawlkit`. Slack token scopes,
+workspace selection, API/Desktop source behavior, and schema compatibility stay
+in `slacrawl`.
+
 The config is designed to work with safe defaults:
 
 - SQLite lives under `~/.slacrawl/`
@@ -132,6 +137,7 @@ stale_after = "15m"
 Behavior:
 
 - `publish` exports gzipped JSONL table shards plus `manifest.json` into `repo_path`
+- current snapshots contain metadata tables only; future file/media blobs must be gzip-compressed in the share repo, with raw-media import kept for backward compatibility
 - `subscribe` writes a git-reader config, disables Slack API and desktop sources for that config, clones the repo, and imports the snapshot
 - pass `--db` to `subscribe` when you want the reader archive to use a non-default SQLite file
 - `update` pulls and imports only when the manifest changed

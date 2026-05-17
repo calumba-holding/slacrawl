@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 func TestAnalyticsHelpCommand(t *testing.T) {
@@ -70,6 +70,11 @@ func TestAnalyticsDigestCommand(t *testing.T) {
 	require.Equal(t, digest["top_n"], analyticsDigest["top_n"])
 	require.Equal(t, digest["totals"], analyticsDigest["totals"])
 	require.Equal(t, digest["channels"], analyticsDigest["channels"])
+
+	stdout.Reset()
+	require.NoError(t, app.Run(ctx, []string{"--config", configPath, "analytics", "digest", "--since", "7d", "--workspace", "T1", "--format", "json"}))
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &analyticsDigest))
+	require.Equal(t, digest["totals"], analyticsDigest["totals"])
 }
 
 func TestAnalyticsQuietCommand(t *testing.T) {
@@ -141,7 +146,11 @@ func TestAnalyticsTrendsCommand(t *testing.T) {
 
 	seed := func(channelID string, weekStart time.Time, count int) {
 		for i := 0; i < count; i++ {
-			ts := fmt.Sprintf("%d.%06d", weekStart.Add(time.Duration(i+1)*time.Hour).Unix(), i+1)
+			seedTime := weekStart.Add(time.Duration(i+1) * time.Hour)
+			if weekStart.Equal(currentWeekStart) {
+				seedTime = now
+			}
+			ts := fmt.Sprintf("%d.%06d", seedTime.Unix(), i+1)
 			require.NoError(t, st.UpsertMessage(ctx, store.Message{
 				ChannelID:      channelID,
 				TS:             ts,

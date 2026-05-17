@@ -16,7 +16,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 const (

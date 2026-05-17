@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 // QuietOptions controls how a Quiet report is built.

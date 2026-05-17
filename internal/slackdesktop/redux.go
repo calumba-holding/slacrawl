@@ -16,8 +16,8 @@ import (
 	"github.com/golang/snappy"
 	"github.com/slack-go/slack"
 
-	"github.com/vincentkoc/slacrawl/internal/search"
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/search"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 const (

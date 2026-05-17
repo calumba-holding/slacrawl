@@ -5,14 +5,16 @@ description: "Slack archive: search, sync, threads/DMs, Slacrawl repo work."
 
 # Slacrawl
 
-Use local Slack archive data first. API sync/full threads/DMs require Slack tokens; desktop mode can work without tokens.
+Use local Slack archive data first. Hit Slack APIs only when archive is stale, missing scope, or user asks for current external context.
 
 ## Sources
 
 - DB: `~/.slacrawl/slacrawl.db`
+- Config: `~/.slacrawl/config.toml`
+- Cache/logs: `~/.slacrawl/{cache,logs}`
+- Git share repo: `~/.slacrawl/share`
 - Repo: `~/Projects/slacrawl`
 - CLI: `slacrawl`
-- Typo shim: `slacawl`
 
 ## Freshness
 
@@ -23,19 +25,14 @@ slacrawl doctor
 slacrawl status --json
 ```
 
-Desktop-only refresh:
+Refresh:
 
 ```bash
-slacrawl sync --source desktop
+slacrawl sync --source bot --latest-only
+slacrawl sync --source wiretap
 ```
 
-API latest refresh, when tokens are available:
-
-```bash
-slacrawl sync --source api --latest-only
-```
-
-Use `--full` only for deliberate historical backfills.
+Use `--full` only for deliberate historical backfills. `bot` = API tokens; `wiretap` = Slack Desktop cache; `all` = API then desktop enrichment.
 
 ## Query Workflow
 
@@ -53,15 +50,20 @@ Common commands:
 ```bash
 slacrawl search --limit 20 "query"
 slacrawl messages --since 7d --limit 50
+slacrawl channels --json
+slacrawl users --json
+slacrawl mentions --limit 50
 slacrawl sql 'select count(*) from messages;'
 ```
+
+Use `slacrawl --json sql ...` for exact read-only counts/joins/rankings. Keep SQL to `select`/`with`.
 
 ## Verification
 
 For repo edits:
 
 ```bash
-go test ./...
+GOWORK=off go test ./...
 make test
 ```
 

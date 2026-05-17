@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pelletier/go-toml/v2"
+	crawlconfig "github.com/vincentkoc/crawlkit/config"
 )
 
 const (
@@ -55,13 +55,24 @@ type DesktopConfig struct {
 }
 
 type SyncConfig struct {
-	Concurrency         int    `toml:"concurrency"`
-	RepairEvery         string `toml:"repair_every"`
-	DesktopRefreshEvery string `toml:"desktop_refresh_every"`
-	FullHistory         bool   `toml:"full_history"`
-	IncludeDMs          *bool  `toml:"include_dms"`
-	FileMedia           *bool  `toml:"file_media"`
-	MaxFileBytes        int64  `toml:"max_file_bytes"`
+	Concurrency         int      `toml:"concurrency"`
+	RepairEvery         string   `toml:"repair_every"`
+	DesktopRefreshEvery string   `toml:"desktop_refresh_every"`
+	FullHistory         bool     `toml:"full_history"`
+	IncludeDMs          *bool    `toml:"include_dms"`
+	AutoJoin            *bool    `toml:"auto_join"`
+	ExcludeChannels     []string `toml:"exclude_channels"`
+	FileMedia           *bool    `toml:"file_media"`
+	MaxFileBytes        int64    `toml:"max_file_bytes"`
+}
+
+// AutoJoinResolved returns whether the bot should auto-join public channels
+// it encounters during sync. Defaults to true for backwards compatibility.
+func (s SyncConfig) AutoJoinResolved() bool {
+	if s.AutoJoin == nil {
+		return true
+	}
+	return *s.AutoJoin
 }
 
 type SearchConfig struct {
@@ -83,14 +94,24 @@ type Tokens struct {
 	User string
 }
 
-//nolint:gosec // TokenEnv fields are environment variable names, not secret values.
+var appConfig = crawlconfig.App{Name: "slacrawl", BaseDir: "~/" + defaultDirName, LegacyBaseDir: "~/" + defaultDirName}
+
 func Default() Config {
-	base := "~/" + defaultDirName
+	paths, err := appConfig.DefaultPaths()
+	if err != nil {
+		base := "~/" + defaultDirName
+		paths = crawlconfig.Paths{
+			DBPath:   filepath.ToSlash(filepath.Join(base, "slacrawl.db")),
+			CacheDir: filepath.ToSlash(filepath.Join(base, "cache")),
+			LogDir:   filepath.ToSlash(filepath.Join(base, "logs")),
+			ShareDir: filepath.ToSlash(filepath.Join(base, "share")),
+		}
+	}
 	return Config{
 		Version:  1,
-		DBPath:   filepath.ToSlash(filepath.Join(base, "slacrawl.db")),
-		CacheDir: filepath.ToSlash(filepath.Join(base, "cache")),
-		LogDir:   filepath.ToSlash(filepath.Join(base, "logs")),
+		DBPath:   filepath.ToSlash(paths.DBPath),
+		CacheDir: filepath.ToSlash(paths.CacheDir),
+		LogDir:   filepath.ToSlash(paths.LogDir),
 		Slack: SlackConfig{
 			Bot:  TokenConfig{Enabled: true, TokenEnv: "SLACK_BOT_TOKEN"},
 			App:  TokenConfig{Enabled: true, TokenEnv: "SLACK_APP_TOKEN"},
@@ -111,7 +132,7 @@ func Default() Config {
 			DefaultMode: "fts",
 		},
 		Share: ShareConfig{
-			RepoPath:   filepath.ToSlash(filepath.Join(base, "share")),
+			RepoPath:   filepath.ToSlash(paths.ShareDir),
 			Branch:     "main",
 			AutoUpdate: true,
 			StaleAfter: "15m",
@@ -120,21 +141,13 @@ func Default() Config {
 }
 
 func DefaultConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, defaultDirName, "config.toml"), nil
+	paths, err := appConfig.DefaultPaths()
+	return paths.ConfigPath, err
 }
 
 func Load(path string) (Config, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // Users choose the config path explicitly.
-	if err != nil {
-		return Config{}, err
-	}
-
 	cfg := Default()
-	if err := toml.Unmarshal(data, &cfg); err != nil {
+	if err := crawlconfig.LoadTOML(path, &cfg); err != nil {
 		return Config{}, err
 	}
 	if err := cfg.Normalize(); err != nil {
@@ -150,11 +163,7 @@ func (c Config) Save(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
-	data, err := toml.Marshal(c)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0o600)
+	return crawlconfig.WriteTOML(path, c, 0o644)
 }
 
 func (c *Config) Normalize() error {
@@ -215,17 +224,7 @@ func ExpandPath(path string) (string, error) {
 	if path == "" {
 		return "", nil
 	}
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		if path == "~" {
-			return home, nil
-		}
-		path = filepath.Join(home, path[2:])
-	}
-	return filepath.Clean(path), nil
+	return filepath.Clean(crawlconfig.ExpandHome(path)), nil
 }
 
 func (c Config) ResolveTokens() Tokens {

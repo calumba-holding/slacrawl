@@ -13,8 +13,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/vincentkoc/slacrawl/internal/media"
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/media"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 func TestExportImportRoundTrip(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 // TrendsOptions controls how a Trends report is built.
