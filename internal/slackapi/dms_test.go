@@ -13,7 +13,7 @@ import (
 	"github.com/slack-go/slack"
 	"github.com/stretchr/testify/require"
 
-	"github.com/vincentkoc/slacrawl/internal/config"
+	"github.com/openclaw/slacrawl/internal/config"
 )
 
 func TestFetchDMsReturnsNilWhenUserClientMissing(t *testing.T) {

@@ -1,4 +1,4 @@
-module github.com/vincentkoc/slacrawl
+module github.com/openclaw/slacrawl
 
 go 1.26.3
 

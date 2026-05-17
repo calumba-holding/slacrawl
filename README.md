@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="./LICENSE"><img src="https://img.shields.io/github/license/vincentkoc/slacrawl" alt="License"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/openclaw/slacrawl" alt="License"></a>
   <img src="https://img.shields.io/badge/go-1.25%2B-00ADD8" alt="Go 1.25+">
   <img src="https://img.shields.io/badge/storage-SQLite-003B57" alt="SQLite">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey" alt="Platform">
@@ -89,19 +89,19 @@ brew install slacrawl
 <details>
 <summary>Linux packages from GitHub Releases</summary>
 
-Download the package that matches your platform from the [latest release](https://github.com/vincentkoc/slacrawl/releases/latest).
+Download the package that matches your platform from the [latest release](https://github.com/openclaw/slacrawl/releases/latest).
 
 Debian/Ubuntu:
 
 ```bash
-curl -LO https://github.com/vincentkoc/slacrawl/releases/latest/download/slacrawl_0.6.1_amd64.deb
+curl -LO https://github.com/openclaw/slacrawl/releases/latest/download/slacrawl_0.6.1_amd64.deb
 sudo dpkg -i slacrawl_0.6.1_amd64.deb
 ```
 
 RHEL/Fedora:
 
 ```bash
-curl -LO https://github.com/vincentkoc/slacrawl/releases/latest/download/slacrawl-0.6.1-1.x86_64.rpm
+curl -LO https://github.com/openclaw/slacrawl/releases/latest/download/slacrawl-0.6.1-1.x86_64.rpm
 sudo rpm -i slacrawl-0.6.1-1.x86_64.rpm
 ```
 
@@ -111,7 +111,7 @@ sudo rpm -i slacrawl-0.6.1-1.x86_64.rpm
 <summary>Build from source</summary>
 
 ```bash
-git clone https://github.com/vincentkoc/slacrawl.git
+git clone https://github.com/openclaw/slacrawl.git
 cd slacrawl
 go build -o bin/slacrawl ./cmd/slacrawl
 ./bin/slacrawl --help
@@ -123,7 +123,7 @@ go build -o bin/slacrawl ./cmd/slacrawl
 <summary>Run without building a binary</summary>
 
 ```bash
-git clone https://github.com/vincentkoc/slacrawl.git
+git clone https://github.com/openclaw/slacrawl.git
 cd slacrawl
 go run ./cmd/slacrawl --help
 ```

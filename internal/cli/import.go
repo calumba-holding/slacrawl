@@ -13,10 +13,10 @@ import (
 
 	"github.com/slack-go/slack"
 
-	"github.com/vincentkoc/slacrawl/internal/config"
-	"github.com/vincentkoc/slacrawl/internal/importer"
-	"github.com/vincentkoc/slacrawl/internal/search"
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/config"
+	"github.com/openclaw/slacrawl/internal/importer"
+	"github.com/openclaw/slacrawl/internal/search"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 const (

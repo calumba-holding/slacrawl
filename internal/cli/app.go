@@ -15,15 +15,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openclaw/slacrawl/internal/config"
+	"github.com/openclaw/slacrawl/internal/report"
+	"github.com/openclaw/slacrawl/internal/share"
+	"github.com/openclaw/slacrawl/internal/slackapi"
+	"github.com/openclaw/slacrawl/internal/slackdesktop"
+	"github.com/openclaw/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/syncer"
 	"github.com/vincentkoc/crawlkit/control"
 	"github.com/vincentkoc/crawlkit/tui"
-	"github.com/vincentkoc/slacrawl/internal/config"
-	"github.com/vincentkoc/slacrawl/internal/report"
-	"github.com/vincentkoc/slacrawl/internal/share"
-	"github.com/vincentkoc/slacrawl/internal/slackapi"
-	"github.com/vincentkoc/slacrawl/internal/slackdesktop"
-	"github.com/vincentkoc/slacrawl/internal/store"
-	"github.com/vincentkoc/slacrawl/internal/syncer"
 )
 
 type App struct {

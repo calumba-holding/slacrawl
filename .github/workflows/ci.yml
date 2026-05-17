@@ -84,7 +84,7 @@ jobs:
         run: go test -count=1 ./...
 
       - name: Build CLI
-        run: go build -ldflags "-X github.com/vincentkoc/slacrawl/internal/cli.version=ci" -o bin/slacrawl ./cmd/slacrawl
+        run: go build -ldflags "-X github.com/openclaw/slacrawl/internal/cli.version=ci" -o bin/slacrawl ./cmd/slacrawl
 
       - name: Smoke test CLI control surface
         run: |

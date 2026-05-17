@@ -12,7 +12,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 func TestLoadRootState(t *testing.T) {

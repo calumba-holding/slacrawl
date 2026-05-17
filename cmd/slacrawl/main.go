@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/vincentkoc/slacrawl/internal/cli"
+	"github.com/openclaw/slacrawl/internal/cli"
 )
 
 func main() {

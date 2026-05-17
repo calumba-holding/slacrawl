@@ -19,9 +19,9 @@ import (
 	"github.com/slack-go/slack/socketmode"
 	"github.com/vincentkoc/crawlkit/progress"
 
-	"github.com/vincentkoc/slacrawl/internal/config"
-	"github.com/vincentkoc/slacrawl/internal/search"
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/config"
+	"github.com/openclaw/slacrawl/internal/search"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 const (

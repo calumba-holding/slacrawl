@@ -19,8 +19,8 @@ import (
 	"github.com/slack-go/slack/socketmode"
 	"github.com/stretchr/testify/require"
 
-	"github.com/vincentkoc/slacrawl/internal/config"
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/config"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 func TestSyncHandlesRateLimitAndThreadCoverage(t *testing.T) {

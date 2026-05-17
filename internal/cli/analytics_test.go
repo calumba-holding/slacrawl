@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 func TestAnalyticsDigestCommand(t *testing.T) {

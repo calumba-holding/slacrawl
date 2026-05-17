@@ -5,10 +5,10 @@ import (
 	"errors"
 	"log/slog"
 
-	"github.com/vincentkoc/slacrawl/internal/config"
-	"github.com/vincentkoc/slacrawl/internal/slackapi"
-	"github.com/vincentkoc/slacrawl/internal/slackdesktop"
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/config"
+	"github.com/openclaw/slacrawl/internal/slackapi"
+	"github.com/openclaw/slacrawl/internal/slackdesktop"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 type Source string

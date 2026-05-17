@@ -20,73 +20,71 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   update-tap:
     runs-on: ubuntu-latest
     if: startsWith(github.event.release.tag_name || inputs.tag_name, 'v')
+    env:
+      TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || 'openclaw/homebrew-tap' }}
+      FORMULA: slacrawl
     steps:
-      - name: Validate tap configuration
+      - name: Resolve release tag
         run: |
           set -euo pipefail
-          if [ -z "${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}" ]; then
-            echo "Secret HOMEBREW_TAP_GITHUB_TOKEN is required."
+          echo "RELEASE_TAG=${{ github.event.release.tag_name || inputs.tag_name }}" >> "$GITHUB_ENV"
+
+      - name: Dispatch tap formula update
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::Set HOMEBREW_TAP_GITHUB_TOKEN with workflow access to ${TAP_REPO}"
             exit 1
           fi
 
-      - name: Checkout tap repository
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ vars.HOMEBREW_TAP_REPO || 'vincentkoc/tap' }}
-          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
-
-      - name: Update formula
-        env:
-          TAG: ${{ github.event.release.tag_name || inputs.tag_name }}
-          SOURCE_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          VERSION="${TAG#v}"
-          SOURCE_URL="https://github.com/${SOURCE_REPO}/archive/refs/tags/${TAG}.tar.gz"
-
-          curl -fsSL "${SOURCE_URL}" -o /tmp/slacrawl-src.tar.gz
-          SHA256="$(shasum -a 256 /tmp/slacrawl-src.tar.gz | awk '{print $1}')"
-
-          mkdir -p Formula
-          cat > Formula/slacrawl.rb <<EOF
-          class Slacrawl < Formula
-            desc "Go-based CLI for mirroring Slack workspace data into local SQLite"
-            homepage "https://github.com/${SOURCE_REPO}"
-            url "${SOURCE_URL}"
-            sha256 "${SHA256}"
-            license "MIT"
-            version "${VERSION}"
-
-            depends_on "go" => :build
-
-            def install
-              system "go", "build", *std_go_args(ldflags: "-s -w -X github.com/vincentkoc/slacrawl/internal/cli.version=#{version}"), "./cmd/slacrawl"
-              pkgshare.install "config.example.toml"
-              doc.install "README.md", "LICENSE", "SPEC.md"
-            end
-
-            test do
-              assert_match "Usage of slacrawl:", shell_output("#{bin}/slacrawl --help", 1)
-            end
-          end
-          EOF
-
-      - name: Commit and push formula update
-        env:
-          TAG: ${{ github.event.release.tag_name || inputs.tag_name }}
-        run: |
-          set -euo pipefail
-          git add Formula/slacrawl.rb
-          if git diff --cached --quiet; then
-            echo "No tap changes to commit."
-            exit 0
+          if [ "$(gh api "repos/${TAP_REPO}" --jq '.permissions.push // false')" != "true" ]; then
+            echo "::error::HOMEBREW_TAP_GITHUB_TOKEN must have push access to ${TAP_REPO}."
+            exit 1
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: update slacrawl formula for ${TAG}"
-          git pull --rebase origin main
-          git push
+
+          request_id="${FORMULA}-${RELEASE_TAG}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          expected_title="Update ${FORMULA} for ${RELEASE_TAG} (${request_id})"
+
+          gh workflow run update-formula.yml \
+            --repo "${TAP_REPO}" \
+            --ref main \
+            -f formula="${FORMULA}" \
+            -f tag="${RELEASE_TAG}" \
+            -f repository="${GITHUB_REPOSITORY}" \
+            -f artifact_template="{formula}_{version}_{target}.tar.gz" \
+            -f request_id="${request_id}"
+
+          run_id=""
+          for _ in {1..30}; do
+            run_id=$(gh run list \
+              --repo "${TAP_REPO}" \
+              --workflow update-formula.yml \
+              --branch main \
+              --event workflow_dispatch \
+              --limit 20 \
+              --json databaseId,displayTitle \
+              --jq ".[] | select(.displayTitle == \"${expected_title}\") | .databaseId" | head -n1)
+            if [ -n "${run_id}" ]; then
+              break
+            fi
+            sleep 5
+          done
+
+          if [ -z "${run_id}" ]; then
+            echo "::error::Could not find tap workflow run with title: ${expected_title}"
+            exit 1
+          fi
+
+          gh run watch "${run_id}" \
+            --repo "${TAP_REPO}" \
+            --exit-status \
+            --interval 10

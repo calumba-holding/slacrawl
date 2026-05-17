@@ -6,7 +6,7 @@ import (
 	"flag"
 	"fmt"
 
-	"github.com/vincentkoc/slacrawl/internal/report"
+	"github.com/openclaw/slacrawl/internal/report"
 )
 
 func (a *App) runAnalytics(ctx context.Context, configPath string, args []string, format OutputFormat) error {

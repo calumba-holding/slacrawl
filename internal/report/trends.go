@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vincentkoc/slacrawl/internal/store"
+	"github.com/openclaw/slacrawl/internal/store"
 )
 
 const secondsPerWeek = int64(7 * 24 * 60 * 60)

@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openclaw/slacrawl/internal/store"
 	"github.com/vincentkoc/crawlkit/mirror"
 	"github.com/vincentkoc/crawlkit/snapshot"
-	"github.com/vincentkoc/slacrawl/internal/store"
 )
 
 const (
