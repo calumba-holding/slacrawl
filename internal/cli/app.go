@@ -74,14 +74,14 @@ func (a *App) Run(ctx context.Context, args []string) error {
 		return err
 	}
 	rest := global.Args
+	if global.Version {
+		_, err := fmt.Fprintln(a.Stdout, version)
+		return err
+	}
 	if len(rest) == 0 || rest[0] == "help" || rest[0] == "--help" || rest[0] == "-h" {
 		a.setColorEnabled(FormatText, global.NoColor)
 		a.printHelp()
 		return nil
-	}
-	if global.Version {
-		_, err := fmt.Fprintln(a.Stdout, version)
-		return err
 	}
 
 	configPath := global.Config
