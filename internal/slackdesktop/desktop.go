@@ -358,7 +358,7 @@ func Ingest(ctx context.Context, st *store.Store, sourcePath string) (Source, er
 			return Source{}, err
 		}
 		if team.UserID != "" {
-			if err := st.UpsertUser(ctx, store.User{
+			if err := upsertDesktopUser(ctx, st, store.User{
 				ID:          team.UserID,
 				WorkspaceID: teamID,
 				Name:        fallback(team.UserID, team.UserID),
@@ -438,7 +438,7 @@ func Ingest(ctx context.Context, st *store.Store, sourcePath string) (Source, er
 		if message.Text == "" {
 			continue
 		}
-		if err := st.UpsertMessage(ctx, message, nil); err != nil {
+		if err := upsertDesktopMessage(ctx, st, message, nil); err != nil {
 			return Source{}, err
 		}
 	}
@@ -506,6 +506,28 @@ func Ingest(ctx context.Context, st *store.Store, sourcePath string) (Source, er
 	}
 
 	return source, nil
+}
+
+func upsertDesktopUser(ctx context.Context, st *store.Store, user store.User) error {
+	err := st.UpsertUser(ctx, user)
+	if err == nil {
+		return nil
+	}
+	if store.IsWorkspaceCollision(err, "user") {
+		return nil
+	}
+	return err
+}
+
+func upsertDesktopMessage(ctx context.Context, st *store.Store, message store.Message, mentions []store.Mention) error {
+	err := st.UpsertMessage(ctx, message, mentions)
+	if err == nil {
+		return nil
+	}
+	if store.IsWorkspaceCollision(err, "message") {
+		return nil
+	}
+	return err
 }
 
 func localSummary(extracted ExtractedData) LocalStorageSummary {
@@ -830,13 +852,22 @@ func draftText(draft Draft) string {
 }
 
 func draftTS(draft Draft) string {
+	id := draftID(draft)
 	if draft.LastUpdatedTS > 0 {
-		return "draft:" + trimFloat(draft.LastUpdatedTS) + ":" + fallback(draft.ClientDraftID, draft.ID)
+		return "draft:" + trimFloat(draft.LastUpdatedTS) + ":" + id
 	}
 	if draft.LastUpdated > 0 {
-		return "draft:" + trimFloat(draft.LastUpdated) + ":" + fallback(draft.ClientDraftID, draft.ID)
+		return "draft:" + trimFloat(draft.LastUpdated) + ":" + id
 	}
-	return "draft:" + fallback(draft.ClientDraftID, draft.ID)
+	return "draft:" + id
+}
+
+func draftID(draft Draft) string {
+	id := fallback(draft.ClientDraftID, draft.ID)
+	if draft.WorkspaceID == "" {
+		return id
+	}
+	return draft.WorkspaceID + ":" + id
 }
 
 func trimFloat(value float64) string {

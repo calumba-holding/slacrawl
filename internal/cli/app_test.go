@@ -298,8 +298,8 @@ func TestWorkspaceFilteredReadCommands(t *testing.T) {
 		TS:             "2.0",
 		WorkspaceID:    "T2",
 		UserID:         "U2",
-		Text:           "incident beta",
-		NormalizedText: "incident beta",
+		Text:           "incident beta. What's the best way to coordinate meetings?",
+		NormalizedText: "incident beta. What's the best way to coordinate meetings?",
 		SourceRank:     2,
 		SourceName:     "api-bot",
 		RawJSON:        "{}",
@@ -312,6 +312,12 @@ func TestWorkspaceFilteredReadCommands(t *testing.T) {
 
 	require.NoError(t, app.Run(context.Background(), []string{"--config", configPath, "--json", "search", "--workspace", "T2", "incident"}))
 	var searchRows []map[string]any
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &searchRows))
+	require.Len(t, searchRows, 1)
+	require.Equal(t, "T2", searchRows[0]["workspace_id"])
+
+	stdout.Reset()
+	require.NoError(t, app.Run(context.Background(), []string{"--config", configPath, "--json", "search", "--workspace", "T2", "What's the best way"}))
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &searchRows))
 	require.Len(t, searchRows, 1)
 	require.Equal(t, "T2", searchRows[0]["workspace_id"])

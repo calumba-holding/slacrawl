@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.3 - Unreleased
+
+### Fixes
+
+- Search now treats normal CLI input as safe text instead of raw FTS syntax, with phrase, term, and substring fallback plus `--raw-fts` for advanced queries.
+- Wiretap desktop import now includes cached Slack DM and MPIM messages from IndexedDB redux state.
+
 ## 0.6.2 - 2026-05-18
 
 ### Fixes

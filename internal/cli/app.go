@@ -601,10 +601,18 @@ func (a *App) runSearch(ctx context.Context, configPath string, args []string, f
 		return nil
 	}
 	var parsed slacrawlSearchArgs
-	if err := parseKongArgs(&parsed, normalizeSingleDashLongFlags(args, "workspace", "limit"), "slacrawl search", a.Stdout, a.Stderr); err != nil {
+	if err := parseKongArgs(&parsed, normalizeSingleDashLongFlags(args, "workspace", "limit", "mode", "raw-fts"), "slacrawl search", a.Stdout, a.Stderr); err != nil {
 		return err
 	}
+	query := strings.TrimSpace(strings.Join(parsed.Query, " "))
+	if query == "" {
+		return errors.New("search query required")
+	}
 	cfg, err := loadConfig(configPath)
+	if err != nil {
+		return err
+	}
+	mode, err := resolveSearchMode(parsed.Mode, cfg.Search.DefaultMode, parsed.RawFTS)
 	if err != nil {
 		return err
 	}
@@ -613,11 +621,53 @@ func (a *App) runSearch(ctx context.Context, configPath string, args []string, f
 		return err
 	}
 	defer func() { _ = st.Close() }()
-	results, err := st.Search(ctx, coalesce(parsed.Workspace, cfg.WorkspaceID), strings.Join(parsed.Query, " "), store.RequireLimit(parsed.Limit))
+	results, err := st.SearchMessages(ctx, store.SearchOptions{
+		WorkspaceID: coalesce(parsed.Workspace, cfg.WorkspaceID),
+		Query:       query,
+		Limit:       store.RequireLimit(parsed.Limit),
+		Mode:        mode,
+	})
 	if err != nil {
 		return err
 	}
-	return a.writeOutput("Search", results, format, false)
+	if err := a.writeOutput("Search", results, format, false); err != nil {
+		return err
+	}
+	if len(results) == 0 && format == FormatText {
+		a.writeSearchNoRowsHint(ctx, st)
+	}
+	return nil
+}
+
+func resolveSearchMode(flagMode string, configMode string, rawFTS bool) (store.SearchMode, error) {
+	if rawFTS {
+		return store.SearchModeRawFTS, nil
+	}
+	mode := strings.ToLower(strings.TrimSpace(coalesce(flagMode, configMode)))
+	switch mode {
+	case "", "auto", "fts":
+		return store.SearchModeAuto, nil
+	case "phrase":
+		return store.SearchModePhrase, nil
+	case "terms", "literal":
+		return store.SearchModeTerms, nil
+	case "raw-fts", "raw":
+		return store.SearchModeRawFTS, nil
+	default:
+		return "", fmt.Errorf("invalid search mode %q: use auto, phrase, terms, or raw-fts", mode)
+	}
+}
+
+func (a *App) writeSearchNoRowsHint(ctx context.Context, st *store.Store) {
+	status, err := st.Status(ctx)
+	if err != nil {
+		return
+	}
+	lastSync := "-"
+	if !status.LastSyncAt.IsZero() {
+		lastSync = status.LastSyncAt.Format(time.RFC3339)
+	}
+	_, _ = fmt.Fprintf(a.Stdout, "\nhint: no matches in %d local messages; last sync %s; for recent Slack Desktop data run `slacrawl sync --source wiretap`\n", status.Messages, lastSync)
 }
 
 func (a *App) runTUI(ctx context.Context, configPath string, args []string, format OutputFormat) error {
@@ -1177,6 +1227,8 @@ func (a *App) runSQL(ctx context.Context, configPath string, args []string, form
 type slacrawlSearchArgs struct {
 	Workspace string   `help:"Workspace id."`
 	Limit     int      `default:"50" help:"Row limit."`
+	Mode      string   `help:"Search mode: auto, phrase, terms, or raw-fts."`
+	RawFTS    bool     `name:"raw-fts" help:"Treat query as raw SQLite FTS5 MATCH syntax."`
 	Query     []string `arg:"" name:"query" help:"Search query."`
 }
 
@@ -2246,6 +2298,8 @@ func printSearchUsage(w io.Writer) {
 Flags:
   -workspace string  workspace id
   -limit int         row limit (default 50)
+  -mode string       search mode: auto, phrase, terms, or raw-fts
+  -raw-fts           treat query as raw SQLite FTS5 MATCH syntax
 `)
 }
 

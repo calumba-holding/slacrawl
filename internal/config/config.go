@@ -129,7 +129,7 @@ func Default() Config {
 			MaxFileBytes:        100 << 20,
 		},
 		Search: SearchConfig{
-			DefaultMode: "fts",
+			DefaultMode: "auto",
 		},
 		Share: ShareConfig{
 			RepoPath:   filepath.ToSlash(paths.ShareDir),
@@ -177,7 +177,7 @@ func (c *Config) Normalize() error {
 		c.Sync.MaxFileBytes = 100 << 20
 	}
 	if c.Search.DefaultMode == "" {
-		c.Search.DefaultMode = "fts"
+		c.Search.DefaultMode = "auto"
 	}
 	if c.Share.RepoPath == "" {
 		c.Share.RepoPath = Default().Share.RepoPath

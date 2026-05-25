@@ -32,7 +32,7 @@ Data stays on your machine. You can run it in API mode, desktop mode, or a hybri
 - mention extraction for structured querying
 - read-only SQL access for ad hoc analysis
 - `doctor` diagnostics for config, database, token, and desktop-source checks
-- desktop-local ingestion of workspace metadata, channels, users, cached channel messages, drafts, read markers, recent-channel hints, and custom-status metadata
+- desktop-local ingestion of workspace metadata, channels, users, cached channel/DM messages, drafts, read markers, recent-channel hints, and custom-status metadata
 - optional Socket Mode live tailing via app token
 - periodic desktop refresh with `watch`
 - git-backed archive publishing, subscription, and read-time auto-refresh
@@ -188,7 +188,7 @@ Choose the path that matches your setup:
 - `import` imports a Slack export ZIP or extracted export directory
 - `tail` listens for live events through Socket Mode, including one tail per configured workspace
 - `watch` refreshes desktop-local state on a schedule
-- `search` runs local FTS queries, optionally filtered by workspace
+- `search` runs safe local text search with FTS and substring fallback, optionally filtered by workspace
 - `messages` lists stored messages with filters
 - `mentions` lists structured mention records
 - `sql` runs read-only SQL against the local database

@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/golang/snappy"
 	"github.com/stretchr/testify/require"
@@ -59,6 +60,19 @@ func TestParseLocalStorage(t *testing.T) {
 	require.Equal(t, "Heads down", data.Statuses[0].Statuses[0].Text)
 	require.Len(t, data.Expandables, 1)
 	require.Equal(t, []string{"attach_text_1710000002.000300Channel", "inline_files_msg_1710000002_123Channel"}, data.Expandables[0].Keys)
+}
+
+func TestDraftTSIncludesWorkspace(t *testing.T) {
+	require.Equal(t, "draft:1710000001.0002:T111:C111", draftTS(Draft{
+		WorkspaceID:   "T111",
+		ClientDraftID: "C111",
+		LastUpdatedTS: 1710000001.000200,
+	}))
+	require.Equal(t, "draft:1710000001.0002:T222:C111", draftTS(Draft{
+		WorkspaceID:   "T222",
+		ClientDraftID: "C111",
+		LastUpdatedTS: 1710000001.000200,
+	}))
 }
 
 func TestIngestDesktopState(t *testing.T) {
@@ -185,10 +199,12 @@ const value = {
     user_id: "U111"
   },
   channels: {
-    C111: { id: "C111", name: "general", is_channel: true, is_private: false, is_archived: false, is_general: true, context_team_id: "T111", topic: { value: "hello" }, purpose: { value: "world" } }
+    C111: { id: "C111", name: "general", is_channel: true, is_private: false, is_archived: false, is_general: true, context_team_id: "T111", topic: { value: "hello" }, purpose: { value: "world" } },
+    D111: { id: "D111", user: "U222", is_im: true, is_private: true, context_team_id: "T111" }
   },
   members: {
-    U111: { id: "U111", name: "vincent", team_id: "T111", real_name: "Vincent", is_bot: false, deleted: false, profile: { real_name: "Vincent", display_name: "Vin", title: "Founder" } }
+    U111: { id: "U111", name: "vincent", team_id: "T111", real_name: "Vincent", is_bot: false, deleted: false, profile: { real_name: "Vincent", display_name: "Vin", title: "Founder" } },
+    U222: { id: "U222", name: "mike", team_id: "T111", real_name: "Mike", is_bot: false, deleted: false, profile: { real_name: "Mike", display_name: "mike", title: "EA wrangler" } }
   },
   messages: {
     C111: {
@@ -208,6 +224,15 @@ const value = {
             text: "thread reply"
           }
         }
+      }
+    },
+    D111: {
+      "1710000003.000400": {
+        channel: "D111",
+        ts: "1710000003.000400",
+        type: "message",
+        user: "U222",
+        text: "What's the best way to coordinate meetings?"
       }
     }
   },
@@ -243,9 +268,9 @@ fs.writeFileSync(process.argv[1], v8.serialize(value));
 	require.Len(t, states, 1)
 	require.Equal(t, "T111", states[0].WorkspaceID)
 	require.Equal(t, "U111", states[0].UserID)
-	require.Len(t, states[0].Channels, 1)
-	require.Len(t, states[0].Members, 1)
-	require.Len(t, states[0].Messages, 2)
+	require.Len(t, states[0].Channels, 2)
+	require.Len(t, states[0].Members, 2)
+	require.Len(t, states[0].Messages, 3)
 	require.Equal(t, "general", states[0].Channels[0].Name)
 	byTS := map[string]ReduxMessage{}
 	for _, message := range states[0].Messages {
@@ -254,6 +279,107 @@ fs.writeFileSync(process.argv[1], v8.serialize(value));
 	require.Equal(t, "hello <@U222|alice>", byTS["1710000001.000200"].Text)
 	require.Equal(t, "1710000001.000200", byTS["1710000002.000300"].ThreadTS)
 	require.Equal(t, "thread reply", byTS["1710000002.000300"].Text)
+	require.Equal(t, "D111", byTS["1710000003.000400"].Channel)
+}
+
+func TestIngestReduxStatesIncludesIMs(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "slacrawl.db"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, st.Close()) }()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, ingestReduxStates(ctx, st, []ReduxDecodedState{{
+		WorkspaceID: "T111",
+		UserID:      "U111",
+		Channels: []ReduxChannel{{
+			ID:            "D111",
+			User:          "U222",
+			IsIM:          true,
+			IsPrivate:     true,
+			ContextTeamID: "T111",
+		}},
+		Members: []ReduxMember{{
+			ID:     "U222",
+			Name:   "mike",
+			TeamID: "T111",
+			Profile: ReduxMemberProfile{
+				RealName:    "Mike",
+				DisplayName: "mike",
+			},
+		}},
+		Messages: []ReduxMessage{{
+			Channel: "D111",
+			TS:      "1710000003.000400",
+			Type:    "message",
+			User:    "U222",
+			Text:    "What's the best way to coordinate meetings?",
+		}},
+	}}, now))
+
+	channels, err := st.Channels(context.Background(), "", "", 10)
+	require.NoError(t, err)
+	require.Len(t, channels, 1)
+	require.Equal(t, "desktop_im", channels[0].Kind)
+	require.Equal(t, "mike", channels[0].Name)
+
+	rows, err := st.SearchMessages(ctx, store.SearchOptions{Query: "What's the best way", Mode: store.SearchModeAuto, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "D111", rows[0].ChannelID)
+	require.Equal(t, "mike", rows[0].ChannelName)
+}
+
+func TestIngestReduxStatesSkipsDuplicateDesktopUsers(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "slacrawl.db"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, st.Close()) }()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, st.UpsertUser(ctx, store.User{ID: "USLACKBOT", WorkspaceID: "T1", Name: "slackbot", RawJSON: "{}", UpdatedAt: now}))
+	require.NoError(t, ingestReduxStates(ctx, st, []ReduxDecodedState{{
+		WorkspaceID: "T2",
+		UserID:      "U2",
+		Members: []ReduxMember{{
+			ID:   "USLACKBOT",
+			Name: "slackbot",
+			Profile: ReduxMemberProfile{
+				DisplayName: "Slackbot",
+			},
+		}},
+	}}, now))
+}
+
+func TestIngestReduxStatesSkipsDuplicateDesktopMessages(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "slacrawl.db"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, st.Close()) }()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, st.UpsertMessage(ctx, store.Message{
+		ChannelID:      "C1",
+		TS:             "1710000003.000400",
+		WorkspaceID:    "T1",
+		Text:           "already imported",
+		NormalizedText: "already imported",
+		SourceRank:     3,
+		SourceName:     "desktop-indexeddb",
+		RawJSON:        "{}",
+		UpdatedAt:      now,
+	}, nil))
+	require.NoError(t, ingestReduxStates(ctx, st, []ReduxDecodedState{{
+		WorkspaceID: "T2",
+		UserID:      "U2",
+		Messages: []ReduxMessage{{
+			Channel: "C1",
+			TS:      "1710000003.000400",
+			Type:    "message",
+			User:    "U2",
+			Text:    "same slack-connect message",
+		}},
+	}}, now))
 }
 
 func TestNormalizeReduxMessageIncludesBlocksAndAttachments(t *testing.T) {

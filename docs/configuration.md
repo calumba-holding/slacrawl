@@ -54,7 +54,7 @@ desktop_refresh_every = "5m"
 full_history = true
 
 [search]
-default_mode = "fts"
+default_mode = "auto"
 
 [share]
 remote = ""

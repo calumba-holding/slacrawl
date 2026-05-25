@@ -1132,9 +1132,20 @@ func renderMessageListBlock(w *strings.Builder, title string, value any, include
 		if i > 0 {
 			w.WriteByte('\n')
 		}
+		channel := shortValue(row["channel_name"])
+		if channel == "-" {
+			channel = shortValue(row["channel_id"])
+		}
+		if workspace := shortValue(row["workspace_name"]); workspace != "-" {
+			channel = workspace + "/" + channel
+		}
+		user := shortValue(row["user_name"])
+		if user == "-" {
+			user = shortValue(row["user_id"])
+		}
 		w.WriteString(colorize(ansiDim, fmt.Sprintf("[%02d] ", i+1)))
-		w.WriteString(colorize(ansiCyan, shortValue(row["channel_id"])))
-		if user := shortValue(row["user_id"]); user != "-" {
+		w.WriteString(colorize(ansiCyan, channel))
+		if user != "-" {
 			w.WriteString(colorize(ansiDim, " by "))
 			w.WriteString(colorize(ansiGreen, user))
 		}

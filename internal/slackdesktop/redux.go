@@ -41,6 +41,8 @@ type ReduxDecodedState struct {
 type ReduxChannel struct {
 	ID            string        `json:"id"`
 	Name          string        `json:"name"`
+	User          string        `json:"user"`
+	Members       []string      `json:"members"`
 	IsChannel     bool          `json:"is_channel"`
 	IsGroup       bool          `json:"is_group"`
 	IsIM          bool          `json:"is_im"`
@@ -166,7 +168,7 @@ func ingestReduxStates(ctx context.Context, st *store.Store, states []ReduxDecod
 		}
 		for _, member := range state.Members {
 			workspaceID := fallback(member.TeamID, state.WorkspaceID)
-			if err := st.UpsertUser(ctx, store.User{
+			if err := upsertDesktopUser(ctx, st, store.User{
 				ID:          member.ID,
 				WorkspaceID: workspaceID,
 				Name:        fallback(member.Name, member.ID),
@@ -182,21 +184,20 @@ func ingestReduxStates(ctx context.Context, st *store.Store, states []ReduxDecod
 			}
 		}
 		allowedChannels := map[string]struct{}{}
-		blockedChannels := map[string]struct{}{}
+		memberNames := map[string]string{}
+		for _, member := range state.Members {
+			memberNames[member.ID] = firstNonEmpty(member.Profile.DisplayName, member.Profile.RealName, member.Name, member.Real, member.ID)
+		}
 		for _, channel := range state.Channels {
-			if channel.IsIM || channel.IsMPIM {
-				blockedChannels[channel.ID] = struct{}{}
-				continue
-			}
 			workspaceID := fallback(channel.ContextTeamID, state.WorkspaceID)
 			if err := st.UpsertChannel(ctx, store.Channel{
 				ID:          channel.ID,
 				WorkspaceID: workspaceID,
-				Name:        fallback(channel.Name, channel.ID),
+				Name:        reduxChannelName(channel, memberNames),
 				Kind:        reduxChannelKind(channel),
 				Topic:       channel.Topic.Value,
 				Purpose:     channel.Purpose.Value,
-				IsPrivate:   channel.IsPrivate || channel.IsGroup,
+				IsPrivate:   channel.IsPrivate || channel.IsGroup || channel.IsIM || channel.IsMPIM,
 				IsArchived:  channel.IsArchived,
 				IsGeneral:   channel.IsGeneral,
 				RawJSON:     store.MarshalRaw(channel),
@@ -210,17 +211,14 @@ func ingestReduxStates(ctx context.Context, st *store.Store, states []ReduxDecod
 			if message.Channel == "" || message.TS == "" {
 				continue
 			}
-			if _, blocked := blockedChannels[message.Channel]; blocked {
-				continue
-			}
-			if _, ok := allowedChannels[message.Channel]; !ok && !strings.HasPrefix(message.Channel, "C") && !strings.HasPrefix(message.Channel, "G") {
+			if _, ok := allowedChannels[message.Channel]; !ok && !isSlackConversationID(message.Channel) {
 				continue
 			}
 			text := strings.TrimSpace(message.Text)
 			if text == "" && message.Subtype == "" && message.Type == "" {
 				continue
 			}
-			if err := st.UpsertMessage(ctx, store.Message{
+			if err := upsertDesktopMessage(ctx, st, store.Message{
 				ChannelID:      message.Channel,
 				TS:             message.TS,
 				WorkspaceID:    state.WorkspaceID,
@@ -330,6 +328,38 @@ func reduxChannelKind(channel ReduxChannel) string {
 	default:
 		return "desktop_channel"
 	}
+}
+
+func reduxChannelName(channel ReduxChannel, memberNames map[string]string) string {
+	if strings.TrimSpace(channel.Name) != "" {
+		return strings.TrimSpace(channel.Name)
+	}
+	if channel.IsIM {
+		return firstNonEmpty(memberNames[channel.User], channel.User, channel.ID)
+	}
+	if channel.IsMPIM {
+		names := make([]string, 0, len(channel.Members))
+		for _, memberID := range channel.Members {
+			names = append(names, firstNonEmpty(memberNames[memberID], memberID))
+		}
+		if len(names) > 0 {
+			return strings.Join(names, ", ")
+		}
+	}
+	return channel.ID
+}
+
+func isSlackConversationID(value string) bool {
+	return strings.HasPrefix(value, "C") || strings.HasPrefix(value, "G") || strings.HasPrefix(value, "D")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func normalizeReduxMessage(message ReduxMessage) string {

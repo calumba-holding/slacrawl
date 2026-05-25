@@ -103,7 +103,7 @@ function walkMessages(node, fallbackChannel, seenNodes) {
 
   for (const [key, child] of Object.entries(node)) {
     const nextChannel =
-      key.startsWith("C") || key.startsWith("G") ? key : fallbackChannel;
+      key.startsWith("C") || key.startsWith("G") || key.startsWith("D") ? key : fallbackChannel;
     const nextFallbackTS =
       child && typeof child === "object" && !Array.isArray(child) && child.ts === undefined
         ? key

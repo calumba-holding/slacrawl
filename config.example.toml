@@ -47,7 +47,7 @@ full_history = true
 # exclude_channels = [] # channel names to skip during sync, case-insensitive (default: empty)
 
 [search]
-default_mode = "fts"
+default_mode = "auto"
 
 [share]
 remote = ""

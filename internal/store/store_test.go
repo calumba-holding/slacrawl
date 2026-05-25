@@ -52,6 +52,38 @@ func TestStoreRoundTrip(t *testing.T) {
 	require.Equal(t, 1, status.Messages)
 }
 
+func TestSearchMessagesAutoEscapesAndFallsBack(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := Open(dbPath)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, s.Close()) }()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, s.UpsertWorkspace(ctx, Workspace{ID: "T1", Name: "team", RawJSON: "{}", UpdatedAt: now}))
+	require.NoError(t, s.UpsertChannel(ctx, Channel{ID: "D1", WorkspaceID: "T1", Name: "mike", Kind: "desktop_im", RawJSON: "{}", UpdatedAt: now}))
+	require.NoError(t, s.UpsertMessage(ctx, Message{
+		ChannelID:      "D1",
+		TS:             "1779612300.000100",
+		WorkspaceID:    "T1",
+		Text:           "What's the best way to coordinate meetings with you or your claw? Email? My EA can handle anything!",
+		NormalizedText: "What's the best way to coordinate meetings with you or your claw? Email? My EA can handle anything!",
+		SourceRank:     3,
+		SourceName:     "desktop-indexeddb",
+		RawJSON:        "{}",
+		UpdatedAt:      now,
+	}, nil))
+
+	rows, err := s.SearchMessages(ctx, SearchOptions{Query: "What's the best way to coordinate meetings", Mode: SearchModeAuto, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "D1", rows[0].ChannelID)
+
+	rows, err = s.SearchMessages(ctx, SearchOptions{Query: "coordinate anything", Mode: SearchModeAuto, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+}
+
 func TestUpsertMessageDeduplicatesMentions(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := Open(dbPath)
@@ -369,6 +401,37 @@ func TestStoreRejectsCrossWorkspaceKeyCollisions(t *testing.T) {
 	messages, err = s.Messages(ctx, "T2", "", "", 10)
 	require.NoError(t, err)
 	require.Empty(t, messages)
+}
+
+func TestDesktopChannelHintsDoNotBlockDecodedChannels(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := Open(dbPath)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, s.Close()) }()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, s.UpsertChannel(ctx, Channel{ID: "C1", WorkspaceID: "T1", Name: "C1", Kind: "desktop_draft", RawJSON: "{}", UpdatedAt: now}))
+	require.NoError(t, s.UpsertChannel(ctx, Channel{ID: "C1", WorkspaceID: "T2", Name: "general", Kind: "desktop_channel", RawJSON: "{}", UpdatedAt: now}))
+	rows, err := s.Channels(ctx, "", "", 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "T2", rows[0].WorkspaceID)
+	require.Equal(t, "general", rows[0].Name)
+
+	require.NoError(t, s.UpsertChannel(ctx, Channel{ID: "C1", WorkspaceID: "T3", Name: "stale", Kind: "desktop_recent", RawJSON: "{}", UpdatedAt: now}))
+	rows, err = s.Channels(ctx, "", "", 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "T2", rows[0].WorkspaceID)
+	require.Equal(t, "general", rows[0].Name)
+
+	require.NoError(t, s.UpsertChannel(ctx, Channel{ID: "C1", WorkspaceID: "T4", Name: "shared", Kind: "desktop_private_channel", RawJSON: "{}", UpdatedAt: now}))
+	rows, err = s.Channels(ctx, "", "", 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "T2", rows[0].WorkspaceID)
+	require.Equal(t, "general", rows[0].Name)
 }
 
 func TestOpenStampsSchemaVersion(t *testing.T) {

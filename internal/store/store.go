@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	crawlstore "github.com/openclaw/crawlkit/store"
 	"github.com/openclaw/slacrawl/internal/store/storedb"
@@ -337,6 +338,41 @@ type MessageRow struct {
 	SourceName     string `json:"source_name,omitempty"`
 }
 
+type SearchMode string
+
+const (
+	SearchModeAuto   SearchMode = "auto"
+	SearchModePhrase SearchMode = "phrase"
+	SearchModeTerms  SearchMode = "terms"
+	SearchModeRawFTS SearchMode = "raw-fts"
+)
+
+type SearchOptions struct {
+	WorkspaceID string
+	Query       string
+	Limit       int
+	Mode        SearchMode
+}
+
+type WorkspaceCollisionError struct {
+	Entity              string
+	ID                  string
+	ExistingWorkspaceID string
+	WorkspaceID         string
+}
+
+func (e *WorkspaceCollisionError) Error() string {
+	return fmt.Sprintf("%s %q already belongs to workspace %q, not %q", e.Entity, e.ID, e.ExistingWorkspaceID, e.WorkspaceID)
+}
+
+func IsWorkspaceCollision(err error, entity string) bool {
+	var collision *WorkspaceCollisionError
+	if !errors.As(err, &collision) {
+		return false
+	}
+	return entity == "" || collision.Entity == entity
+}
+
 type MentionRow struct {
 	WorkspaceID string `json:"workspace_id"`
 	ChannelID   string `json:"channel_id"`
@@ -542,12 +578,60 @@ func (s *Store) UpsertChannel(ctx context.Context, channel Channel) error {
 		return err
 	}
 	if rows == 0 {
+		existing, err := s.getChannelWorkspaceKind(ctx, channel.ID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("channel %q upsert affected no rows", channel.ID)
+			}
+			return err
+		}
+		if isDesktopHintKind(channel.Kind) {
+			return nil
+		}
+		if isDesktopHintKind(existing.Kind) && strings.HasPrefix(channel.Kind, "desktop_") {
+			return s.replaceChannel(ctx, channel)
+		}
+		if strings.HasPrefix(existing.Kind, "desktop_") && strings.HasPrefix(channel.Kind, "desktop_") {
+			return nil
+		}
+		if existing.WorkspaceID != channel.WorkspaceID {
+			return &WorkspaceCollisionError{Entity: "channel", ID: channel.ID, ExistingWorkspaceID: existing.WorkspaceID, WorkspaceID: channel.WorkspaceID}
+		}
 		if err := rejectWorkspaceCollision(ctx, channel.WorkspaceID, "channel", channel.ID, s.q.GetChannelWorkspace); err != nil {
 			return err
 		}
 		return fmt.Errorf("channel %q upsert affected no rows", channel.ID)
 	}
 	return nil
+}
+
+type channelWorkspaceKind struct {
+	WorkspaceID string
+	Kind        string
+}
+
+func (s *Store) getChannelWorkspaceKind(ctx context.Context, channelID string) (channelWorkspaceKind, error) {
+	var row channelWorkspaceKind
+	err := s.db.QueryRowContext(ctx, `select workspace_id, kind from channels where id = ?`, channelID).Scan(&row.WorkspaceID, &row.Kind)
+	return row, err
+}
+
+func (s *Store) replaceChannel(ctx context.Context, channel Channel) error {
+	_, err := s.db.ExecContext(ctx, `
+update channels
+set workspace_id = ?, name = ?, kind = ?, topic = ?, purpose = ?, is_private = ?, is_archived = ?, is_shared = ?, is_general = ?, raw_json = ?, updated_at = ?
+where id = ?
+`, channel.WorkspaceID, channel.Name, channel.Kind, dbText(channel.Topic), dbText(channel.Purpose), boolInt(channel.IsPrivate), boolInt(channel.IsArchived), boolInt(channel.IsShared), boolInt(channel.IsGeneral), channel.RawJSON, formatDBTime(channel.UpdatedAt), channel.ID)
+	return err
+}
+
+func isDesktopHintKind(kind string) bool {
+	switch kind {
+	case "desktop_draft", "desktop_recent", "desktop_mark":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Store) UpsertUser(ctx context.Context, user User) error {
@@ -788,7 +872,7 @@ func rejectMessageWorkspaceCollision(ctx context.Context, q *storedb.Queries, me
 		return err
 	}
 	if existing != message.WorkspaceID {
-		return fmt.Errorf("message %q already belongs to workspace %q, not %q", messageKey(message.ChannelID, message.TS), existing, message.WorkspaceID)
+		return &WorkspaceCollisionError{Entity: "message", ID: messageKey(message.ChannelID, message.TS), ExistingWorkspaceID: existing, WorkspaceID: message.WorkspaceID}
 	}
 	return nil
 }
@@ -802,7 +886,7 @@ func rejectWorkspaceCollision(ctx context.Context, workspaceID, entity, id strin
 		return err
 	}
 	if existing != workspaceID {
-		return fmt.Errorf("%s %q already belongs to workspace %q, not %q", entity, id, existing, workspaceID)
+		return &WorkspaceCollisionError{Entity: entity, ID: id, ExistingWorkspaceID: existing, WorkspaceID: workspaceID}
 	}
 	return nil
 }
@@ -990,6 +1074,51 @@ func (s *Store) Status(ctx context.Context) (Status, error) {
 }
 
 func (s *Store) Search(ctx context.Context, workspaceID string, query string, limit int) ([]MessageRow, error) {
+	return s.searchFTS(ctx, workspaceID, query, limit)
+}
+
+func (s *Store) SearchMessages(ctx context.Context, opts SearchOptions) ([]MessageRow, error) {
+	query := strings.TrimSpace(opts.Query)
+	if query == "" {
+		return nil, nil
+	}
+	mode := opts.Mode
+	if mode == "" {
+		mode = SearchModeAuto
+	}
+	switch mode {
+	case SearchModeRawFTS:
+		return s.searchFTS(ctx, opts.WorkspaceID, query, opts.Limit)
+	case SearchModePhrase:
+		return s.searchFTS(ctx, opts.WorkspaceID, quoteFTS5Phrase(query), opts.Limit)
+	case SearchModeTerms:
+		return s.searchFTS(ctx, opts.WorkspaceID, termsFTS5Query(query), opts.Limit)
+	case SearchModeAuto:
+		return s.searchAuto(ctx, opts.WorkspaceID, query, opts.Limit)
+	default:
+		return nil, fmt.Errorf("unsupported search mode %q", mode)
+	}
+}
+
+func (s *Store) searchAuto(ctx context.Context, workspaceID string, query string, limit int) ([]MessageRow, error) {
+	candidates := []string{quoteFTS5Phrase(query)}
+	if terms := termsFTS5Query(query); terms != "" && terms != candidates[0] {
+		candidates = append(candidates, terms)
+	}
+
+	for _, candidate := range candidates {
+		rows, err := s.searchFTS(ctx, workspaceID, candidate, limit)
+		if err != nil {
+			return nil, err
+		}
+		if len(rows) > 0 {
+			return rows, nil
+		}
+	}
+	return s.searchLike(ctx, workspaceID, query, limit)
+}
+
+func (s *Store) searchFTS(ctx context.Context, workspaceID string, query string, limit int) ([]MessageRow, error) {
 	sqlQuery := `
 select m.workspace_id, coalesce(w.name, ''), m.channel_id, coalesce(c.name, ''), m.ts, m.user_id,
        coalesce(nullif(u.display_name, ''), nullif(u.real_name, ''), nullif(u.name, ''), ''),
@@ -1004,7 +1133,7 @@ where message_fts match ?
 order by m.ts desc
 limit ?
 `
-	rows, err := s.db.QueryContext(ctx, sqlQuery, query, workspaceID, workspaceID, limit)
+	rows, err := s.db.QueryContext(ctx, sqlQuery, query, workspaceID, workspaceID, RequireLimit(limit))
 	if err != nil {
 		return nil, err
 	}
@@ -1014,6 +1143,82 @@ limit ?
 		return nil, err
 	}
 	return out, s.resolveMessageRowMentions(ctx, out)
+}
+
+func (s *Store) searchLike(ctx context.Context, workspaceID string, query string, limit int) ([]MessageRow, error) {
+	pattern := "%" + escapeLike(strings.ToLower(strings.TrimSpace(query))) + "%"
+	sqlQuery := `
+select m.workspace_id, coalesce(w.name, ''), m.channel_id, coalesce(c.name, ''), m.ts, m.user_id,
+       coalesce(nullif(u.display_name, ''), nullif(u.real_name, ''), nullif(u.name, ''), ''),
+       m.text, m.normalized_text, m.thread_ts, m.reply_count, m.latest_reply, m.subtype, m.source_name
+from messages m
+left join workspaces w on w.id = m.workspace_id
+left join channels c on c.id = m.channel_id
+left join users u on u.id = m.user_id
+where (? = '' or m.workspace_id = ?)
+  and (lower(m.text) like ? escape '\' or lower(m.normalized_text) like ? escape '\')
+order by m.ts desc
+limit ?
+`
+	rows, err := s.db.QueryContext(ctx, sqlQuery, workspaceID, workspaceID, pattern, pattern, RequireLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out, err := scanMessageRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	return out, s.resolveMessageRowMentions(ctx, out)
+}
+
+func quoteFTS5Phrase(query string) string {
+	return `"` + strings.ReplaceAll(strings.TrimSpace(query), `"`, `""`) + `"`
+}
+
+func termsFTS5Query(query string) string {
+	terms := searchTerms(query)
+	if len(terms) == 0 {
+		return quoteFTS5Phrase(query)
+	}
+	quoted := make([]string, 0, len(terms))
+	for _, term := range terms {
+		quoted = append(quoted, quoteFTS5Phrase(term))
+	}
+	return strings.Join(quoted, " AND ")
+}
+
+func searchTerms(query string) []string {
+	fields := strings.FieldsFunc(query, func(r rune) bool {
+		return !(r == '_' || r == '-' || r == '@' || r == '#' || r == '.' || unicode.IsLetter(r) || unicode.IsDigit(r))
+	})
+	out := make([]string, 0, len(fields))
+	seen := map[string]struct{}{}
+	for _, field := range fields {
+		field = strings.Trim(field, "_-.@#")
+		if field == "" {
+			continue
+		}
+		key := strings.ToLower(field)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, field)
+	}
+	return out
+}
+
+func escapeLike(value string) string {
+	var b strings.Builder
+	for _, r := range value {
+		switch r {
+		case '\\', '%', '_':
+			b.WriteRune('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func (s *Store) Messages(ctx context.Context, workspaceID string, channelID string, userID string, limit int) ([]MessageRow, error) {
