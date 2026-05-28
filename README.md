@@ -1,3 +1,5 @@
+![slacrawl banner](docs/assets/readme-banner.jpg)
+
 <h1 align="center">💾 slacrawl</h1>
 
 <p align="center">
