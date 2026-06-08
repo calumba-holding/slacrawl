@@ -638,14 +638,6 @@ func (f ingestFilter) allowWorkspace(workspaceID string) bool {
 	return workspaceID == f.workspaceID
 }
 
-func (f ingestFilter) allowChannel(workspaceID, channelID string) bool {
-	return f.allowChannelNames(workspaceID, channelID, nil)
-}
-
-func (f ingestFilter) allowChannelName(workspaceID, channelID, channelName string) bool {
-	return f.allowChannelNames(workspaceID, channelID, []string{channelName})
-}
-
 func (f ingestFilter) allowChannelNames(workspaceID, channelID string, channelNames []string) bool {
 	channelID = strings.TrimSpace(channelID)
 	if !f.allowWorkspace(workspaceID) {
