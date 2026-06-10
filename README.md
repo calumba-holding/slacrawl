@@ -49,7 +49,7 @@ Data stays on your machine. You can run it in API mode, MCP connector mode, desk
 - channel threads
 - local FTS search
 - read-only SQL access
-- macOS Slack Desktop discovery
+- macOS and Linux Slack Desktop discovery
 - optional Slack file media caching
 
 ## Not Yet Included
@@ -68,7 +68,7 @@ If one of those gaps matters to your workflow, open an issue so it can be tracke
 - a configured Slack MCP connector if you want MCP-backed sync
 - an app token if you want to use `tail`
 - an optional user token for fuller historical thread coverage
-- macOS Slack Desktop only if you want desktop-local discovery
+- Slack Desktop on macOS or Linux only if you want desktop-local discovery
 
 ## Install
 
@@ -427,16 +427,22 @@ The starter config lives in [`config.example.toml`](./config.example.toml). By d
 - `SLACK_APP_TOKEN`
 - `SLACK_USER_TOKEN`
 
-Desktop discovery is enabled by default and uses:
+Desktop discovery is enabled by default and checks the supported Slack Desktop
+locations for your platform:
 
 ```text
+# macOS
 ~/Library/Containers/com.tinyspeck.slackmacgap/Data/Library/Application Support/Slack
+
+# Linux
+${XDG_CONFIG_HOME}/Slack
+~/.config/Slack
 ```
 
 Desktop config notes:
 
 - set `[slack.desktop].enabled = false` to disable desktop ingestion
-- leave `[slack.desktop].path = ""` to auto-detect the macOS Slack path
+- leave `[slack.desktop].path = ""` to auto-detect the macOS or Linux Slack path
 - set a custom absolute path if Slack Desktop data lives elsewhere
 - set `[slack.bot]`, `[slack.app]`, or `[slack.user]` `enabled = false` to ignore that token source entirely
 
