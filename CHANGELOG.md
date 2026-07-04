@@ -2,6 +2,10 @@
 
 ## 0.7.5 - Unreleased
 
+### Performance
+
+- Made event-history upgrades constant-time by lazily seeding compact message heads on update instead of scanning the entire archive.
+
 ## 0.7.4 - 2026-07-04
 
 ### Fixes
